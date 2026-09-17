@@ -10,7 +10,6 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     const settings = this.syncPlugin.store.settings;
     containerEl.empty();
-    new Setting(containerEl).setName("AnythingLLM Sync").setHeading();
 
     new Setting(containerEl)
       .setName("AnythingLLM URL")
