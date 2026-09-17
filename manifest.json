@@ -1,7 +1,7 @@
 {
   "id": "anythingllm-sync",
   "name": "AnythingLLM Sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.11.4",
   "description": "Automatically sync Markdown notes from a configurable folder to an AnythingLLM workspace.",
   "author": "HBoot",

@@ -1,6 +1,6 @@
 {
   "name": "obsidian-anythingllm-sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automatically sync Markdown notes from Obsidian to an AnythingLLM workspace.",
   "main": "main.js",
   "scripts": {

@@ -1,9 +1,21 @@
-import type { App, TFile } from "obsidian";
+import { TFile, TFolder, type App } from "obsidian";
 import type { DeleteResult, SyncOrigin, SyncRecord, SyncResult } from "../types";
 import { hashContent } from "../utils/hash";
-import { isPathInsideFolder } from "../utils/path";
+import { cleanVaultFolder, isPathInsideFolder } from "../utils/path";
 import { AnythingLLMClient } from "./anythingllm-client";
 import { PluginStore } from "../store/plugin-store";
+
+/** Recursively collect Markdown files inside a folder without enumerating the whole vault. */
+function collectMarkdownFiles(folder: TFolder, out: TFile[] = []): TFile[] {
+  for (const child of folder.children) {
+    if (child instanceof TFolder) {
+      collectMarkdownFiles(child, out);
+    } else if (child instanceof TFile && child.extension.toLowerCase() === "md") {
+      out.push(child);
+    }
+  }
+  return out;
+}
 
 export class SyncService {
   private readonly queues = new Map<string, Promise<unknown>>();
@@ -28,9 +40,13 @@ export class SyncService {
   }
 
   async syncWatchedFolder(): Promise<{ synced: number; skipped: number; failed: number }> {
-    const files = this.app.vault
-      .getMarkdownFiles()
-      .filter((file) => isPathInsideFolder(file.path, this.store.settings.watchFolder));
+    const watchFolder = cleanVaultFolder(this.store.settings.watchFolder);
+    if (!watchFolder) return { synced: 0, skipped: 0, failed: 0 };
+
+    const folder = this.app.vault.getFolderByPath(watchFolder);
+    if (!folder) return { synced: 0, skipped: 0, failed: 0 };
+
+    const files = collectMarkdownFiles(folder);
 
     let synced = 0;
     let skipped = 0;
