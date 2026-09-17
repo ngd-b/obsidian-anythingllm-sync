@@ -10,7 +10,7 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     const settings = this.syncPlugin.store.settings;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "AnythingLLM Sync" });
+    new Setting(containerEl).setName("AnythingLLM Sync").setHeading();
 
     new Setting(containerEl)
       .setName("AnythingLLM URL")
@@ -145,7 +145,7 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
         })
       );
 
-    containerEl.createEl("h3", { text: "Maintenance" });
+    new Setting(containerEl).setName("Maintenance").setHeading();
 
     new Setting(containerEl)
       .setName("Sync watched folder now")
