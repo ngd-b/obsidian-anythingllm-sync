@@ -39,7 +39,7 @@ export class PluginStore {
     }
 
     const syncRecords = isRecord(raw.syncRecords)
-      ? sanitizeSyncRecords(raw.syncRecords as Record<string, SyncRecord>)
+      ? sanitizeSyncRecords(raw.syncRecords)
       : {};
 
     this.data = { schemaVersion: 1, settings, syncRecords };
