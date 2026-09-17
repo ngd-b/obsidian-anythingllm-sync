@@ -1,12 +1,12 @@
 {
   "name": "obsidian-anythingllm-sync",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": true,
   "description": "Obsidian plugin that automatically syncs Markdown notes to an AnythingLLM workspace.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "devDependencies": {

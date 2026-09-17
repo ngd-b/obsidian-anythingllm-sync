@@ -120,7 +120,7 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Automatic sync")
-      .setDesc("Automatically sync newly created Markdown files inside the watch folder.")
+      .setDesc("Automatically sync new Markdown files inside the watch folder after their initial content finishes writing.")
       .addToggle((toggle) =>
         toggle.setValue(settings.autoSync).onChange(async (value) => {
           await this.syncPlugin.store.updateSettings({ autoSync: value });
@@ -142,7 +142,7 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
           }),
       );
 
-    containerEl.createEl("h3", { text: "Current v0.1 scope" });
+    containerEl.createEl("h3", { text: "Current scope" });
     containerEl.createEl("p", {
       text: "New Markdown files are synced automatically. The project already stores local↔remote sync state so update, delete, and rename synchronization can be added without changing the architecture.",
       cls: "setting-item-description",

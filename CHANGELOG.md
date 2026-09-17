@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Fix initial auto-sync for notes whose content is written after the file is created.
+- Listen to both `create` and `modify` events and debounce them into one initial sync.
+- Ignore `modify` events after a file already has a sync record, so update synchronization is still not enabled accidentally.
+
 ## 0.2.0
 
 - Refactored the plugin into listener, service, API client, store, settings, types, and utility layers.

@@ -1,7 +1,7 @@
 {
   "id": "anythingllm-sync",
   "name": "AnythingLLM Sync",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "minAppVersion": "1.4.0",
   "description": "Automatically sync Markdown notes from a configurable Obsidian folder to an AnythingLLM workspace.",
   "author": "HBoot",

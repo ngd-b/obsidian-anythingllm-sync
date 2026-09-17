@@ -3,8 +3,5 @@ node_modules/
 .DS_Store
 main.js
 main.js.map
-release/
-.typecheck/
+release/*.zip
 .env
-.env.*
-!.env.example

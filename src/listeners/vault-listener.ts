@@ -18,12 +18,23 @@ export class VaultListener {
   register(): void {
     this.plugin.registerEvent(
       this.plugin.app.vault.on("create", (file) => {
-        this.handleCreate(file);
+        this.handleCandidate(file);
       }),
     );
 
-    // v0.1 intentionally syncs new files only.
-    // Future modify/delete/rename support belongs here, while SyncService stays
+    // A new Obsidian note is often created before its content is written.
+    // Web Clipper can also emit create first and then one or more modify events.
+    // Debounce both events so we sync only after the initial write settles.
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("modify", (file) => {
+        // v0.2.2 uses modify only to finish the FIRST sync.
+        // Updating already-synced remote documents remains intentionally disabled.
+        if (file instanceof TFile && this.store.getSyncRecord(file.path)) return;
+        this.handleCandidate(file);
+      }),
+    );
+
+    // Future delete/rename support belongs here, while SyncService stays
     // responsible for synchronization decisions and AnythingLLMClient stays API-only.
   }
 
@@ -32,7 +43,7 @@ export class VaultListener {
     this.timers.clear();
   }
 
-  private handleCreate(file: TAbstractFile): void {
+  private handleCandidate(file: TAbstractFile): void {
     const settings = this.store.settings;
     if (!settings.autoSync) return;
     if (!(file instanceof TFile)) return;
