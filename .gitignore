@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+main.js
+main.js.map
+release/
+.typecheck/
+.env
+.env.*
+!.env.example
