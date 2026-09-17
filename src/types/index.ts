@@ -5,12 +5,13 @@ export interface WorkspaceOption {
 
 export interface AnythingLLMSyncSettings {
   baseUrl: string;
-  apiKey: string;
+  apiKeySecretId: string;
   workspaceSlug: string;
   workspaceName: string;
   watchFolder: string;
   autoSync: boolean;
   syncDelayMs: number;
+  showNotices: boolean;
 }
 
 export interface SyncRecord {
@@ -23,6 +24,7 @@ export interface SyncRecord {
 }
 
 export interface PersistedPluginData {
+  schemaVersion: 1;
   settings: AnythingLLMSyncSettings;
   syncRecords: Record<string, SyncRecord>;
 }
@@ -47,9 +49,13 @@ export interface UploadDocumentResult {
   documents: AnythingLLMDocument[];
 }
 
-export type SyncOrigin = "auto" | "manual";
+export type SyncOrigin = "auto" | "manual" | "bulk" | "rename";
 
 export type SyncResult =
-  | { status: "synced"; record: SyncRecord }
+  | { status: "synced"; operation: "created" | "updated" | "migrated"; record: SyncRecord }
   | { status: "skipped"; reason: "unchanged" | "empty" }
   | { status: "ignored"; reason: "unsupported-file" | "outside-watch-folder" };
+
+export type DeleteResult =
+  | { status: "deleted"; record: SyncRecord }
+  | { status: "skipped"; reason: "not-synced" };

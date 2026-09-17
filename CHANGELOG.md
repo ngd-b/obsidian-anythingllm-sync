@@ -1,18 +1,15 @@
 # Changelog
 
-## 0.2.2
+## 1.0.0
 
-- Fix initial auto-sync for notes whose content is written after the file is created.
-- Listen to both `create` and `modify` events and debounce them into one initial sync.
-- Ignore `modify` events after a file already has a sync record, so update synchronization is still not enabled accidentally.
-
-## 0.2.0
-
-- Refactored the plugin into listener, service, API client, store, settings, types, and utility layers.
-- Added persistent local ↔ AnythingLLM document sync records.
-- Added content hashing and duplicate protection.
-- Added migration support for the original flat v0.1 settings format.
-- Added workspace cache reset when AnythingLLM URL/API key changes.
-- Added serialized persistence writes for concurrent sync events.
-- Kept v0.2 automatic behavior intentionally limited to newly created Markdown files.
-- Refuse changed-file reuploads until proper update synchronization exists, preventing accidental duplicate remote documents.
+- Automatically sync new Markdown notes from a configurable folder.
+- Debounce Web Clipper and editor write events.
+- Automatically update AnythingLLM Workspace embeddings after note edits.
+- Remove Workspace embeddings when synchronized notes are deleted.
+- Re-sync renamed notes so the remote title follows the new filename.
+- Support moving synchronized notes between selected AnythingLLM workspaces.
+- Add one-click bulk sync for existing notes.
+- Add manual sync command for the current note.
+- Store AnythingLLM API keys with Obsidian SecretStorage.
+- Persist local path, content hash, remote location and workspace mapping.
+- Add GitHub build and release workflows.

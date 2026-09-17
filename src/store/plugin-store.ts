@@ -1,45 +1,57 @@
 import type { Plugin } from "obsidian";
-import { DEFAULT_SETTINGS } from "../settings/defaults";
-import type {
-  AnythingLLMSyncSettings,
-  PersistedPluginData,
-  SyncRecord,
-} from "../types";
+import { DEFAULT_DATA, DEFAULT_SECRET_ID, DEFAULT_SETTINGS } from "../settings/defaults";
+import type { AnythingLLMSyncSettings, PersistedPluginData, SyncRecord } from "../types";
+
+interface LegacyData {
+  settings?: Partial<AnythingLLMSyncSettings> & { apiKey?: string };
+  syncRecords?: Record<string, SyncRecord>;
+  apiKey?: string;
+  [key: string]: unknown;
+}
 
 export class PluginStore {
-  private data: PersistedPluginData = {
-    settings: { ...DEFAULT_SETTINGS },
-    syncRecords: {},
-  };
+  private data: PersistedPluginData = structuredClone(DEFAULT_DATA);
   private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly plugin: Plugin) {}
 
   async load(): Promise<void> {
-    const raw = (await this.plugin.loadData()) as Record<string, unknown> | null;
-    const nestedSettings = raw?.settings as Partial<AnythingLLMSyncSettings> | undefined;
+    const raw = (await this.plugin.loadData()) as LegacyData | null;
+    if (!raw) {
+      this.data = structuredClone(DEFAULT_DATA);
+      return;
+    }
 
-    // Migration from v0.1: settings previously lived directly at data.json root.
-    const legacySettings = raw && !nestedSettings
-      ? (raw as unknown as Partial<AnythingLLMSyncSettings>)
-      : undefined;
+    const nestedSettings = raw.settings;
+    const legacyFlat = !nestedSettings ? (raw as Partial<AnythingLLMSyncSettings> & { apiKey?: string }) : undefined;
+    const sourceSettings = nestedSettings ?? legacyFlat ?? {};
+    const legacyApiKey = nestedSettings?.apiKey ?? legacyFlat?.apiKey ?? raw.apiKey;
+    const { apiKey: _legacyApiKey, ...safeSourceSettings } = sourceSettings;
 
-    const rawRecords = raw?.syncRecords;
-    const syncRecords = isRecord(rawRecords)
-      ? (rawRecords as Record<string, SyncRecord>)
+    const settings: AnythingLLMSyncSettings = {
+      ...DEFAULT_SETTINGS,
+      ...safeSourceSettings,
+      apiKeySecretId: safeSourceSettings.apiKeySecretId || DEFAULT_SECRET_ID
+    };
+
+    if (legacyApiKey?.trim()) {
+      this.plugin.app.secretStorage.setSecret(settings.apiKeySecretId, legacyApiKey.trim());
+    }
+
+    const syncRecords = isRecord(raw.syncRecords)
+      ? sanitizeSyncRecords(raw.syncRecords as Record<string, SyncRecord>)
       : {};
 
-    this.data = {
-      settings: {
-        ...DEFAULT_SETTINGS,
-        ...(legacySettings ?? nestedSettings ?? {}),
-      },
-      syncRecords,
-    };
+    this.data = { schemaVersion: 1, settings, syncRecords };
+    await this.persist();
   }
 
   get settings(): AnythingLLMSyncSettings {
     return this.data.settings;
+  }
+
+  get apiKey(): string {
+    return this.plugin.app.secretStorage.getSecret(this.data.settings.apiKeySecretId) ?? "";
   }
 
   getSyncRecord(localPath: string): SyncRecord | undefined {
@@ -65,17 +77,14 @@ export class PluginStore {
     await this.persist();
   }
 
-  async moveSyncRecord(oldPath: string, newPath: string): Promise<void> {
-    const record = this.data.syncRecords[oldPath];
-    if (!record) return;
-
-    delete this.data.syncRecords[oldPath];
-    this.data.syncRecords[newPath] = { ...record, localPath: newPath };
+  async replaceSyncRecord(oldPath: string, record: SyncRecord): Promise<void> {
+    if (oldPath !== record.localPath) delete this.data.syncRecords[oldPath];
+    this.data.syncRecords[record.localPath] = record;
     await this.persist();
   }
 
   private async persist(): Promise<void> {
-    const snapshot = JSON.parse(JSON.stringify(this.data)) as PersistedPluginData;
+    const snapshot = structuredClone(this.data);
     this.writeQueue = this.writeQueue
       .catch(() => undefined)
       .then(() => this.plugin.saveData(snapshot));
@@ -85,4 +94,14 @@ export class PluginStore {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function sanitizeSyncRecords(records: Record<string, SyncRecord>): Record<string, SyncRecord> {
+  const result: Record<string, SyncRecord> = {};
+  for (const [key, value] of Object.entries(records)) {
+    if (!value || typeof value !== "object") continue;
+    if (!value.localPath || !value.remoteLocation || !value.workspaceSlug || !value.contentHash) continue;
+    result[key] = value;
+  }
+  return result;
 }

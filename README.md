@@ -1,83 +1,85 @@
 # AnythingLLM Sync for Obsidian
 
-Automatically sync new Markdown notes from a configurable Obsidian folder into a selected AnythingLLM workspace.
+Automatically keep Markdown notes in an Obsidian folder synchronized with an AnythingLLM workspace.
 
-The main use case is a personal knowledge pipeline such as:
+A typical personal knowledge flow becomes:
 
 ```text
-Web Clipper
-    ↓
-Obsidian Vault / 00-Inbox
-    ↓
-AnythingLLM Sync
-    ↓
+Web page
+  ↓ Obsidian Web Clipper
+Obsidian / Inbox
+  ↓ AnythingLLM Sync
 AnythingLLM Workspace
-    ↓
-Embedding + AI retrieval
+  ↓ Embedding + retrieval
+AI answers from your notes
 ```
 
 ## Features
 
-- Configure any AnythingLLM URL.
-- Store a Developer API key per Obsidian vault.
-- Load AnythingLLM workspaces and select one by name.
-- Configure any vault-relative watch folder; nothing is hard-coded.
-- Include Markdown files in nested subfolders.
-- Automatically react to newly created Markdown notes.
-- Delay the read so Web Clipper can finish writing the note.
-- Upload the note and add it to the selected AnythingLLM workspace.
-- Store local↔remote sync metadata for future update/delete support.
-- Skip unchanged manual uploads and refuse changed-file reuploads until true update sync is implemented, avoiding accidental duplicate remote documents.
-- Manually sync the active note through the command palette.
+- Choose any vault-relative watch folder.
+- Choose an AnythingLLM workspace by name.
+- Automatic sync on Markdown create and edit.
+- Automatic removal from Workspace retrieval when a note is deleted.
+- Re-sync on rename.
+- Debounced writes for Web Clipper and active editing.
+- Content hashing to skip unchanged notes.
+- Bulk sync existing Markdown files.
+- Manual sync command for the active note.
+- Secure Developer API key storage using Obsidian SecretStorage.
+- Per-vault settings and sync state.
 
-## Architecture
+## Requirements
+
+- Obsidian 1.11.4 or newer.
+- An AnythingLLM instance reachable from the device running Obsidian.
+- An AnythingLLM Developer API key.
+
+## Install manually
+
+Download the latest release assets and put them in:
 
 ```text
-src/
-├── main.ts                         Plugin composition / lifecycle
-├── listeners/
-│   └── vault-listener.ts           Obsidian Vault events + debounce/delay
-├── services/
-│   ├── anythingllm-client.ts       AnythingLLM Developer API only
-│   └── sync-service.ts             Sync rules, hashing, state updates
-├── settings/
-│   ├── defaults.ts                 Default plugin settings
-│   └── settings-tab.ts             Obsidian settings UI
-├── store/
-│   └── plugin-store.ts             Persisted settings + sync records
-├── types/
-│   └── index.ts                    Shared domain/API types
-└── utils/
-    ├── hash.ts                     Content hashing
-    └── path.ts                     Vault path normalization/filtering
+<Vault>/.obsidian/plugins/anythingllm-sync/
 ```
 
-The layers intentionally have separate responsibilities:
+Required files:
 
-- `VaultListener` knows about Obsidian events, not AnythingLLM HTTP details.
-- `AnythingLLMClient` knows about HTTP, not Obsidian event behavior.
-- `SyncService` decides whether a note should upload and records the result.
-- `PluginStore` owns persisted state and serializes writes to `data.json`.
-- `main.ts` only wires the components together and registers commands/UI.
-
-This keeps future `modify`, `delete`, and `rename` synchronization isolated from the current create-only MVP.
-
-## Persisted sync state
-
-After a successful upload, the plugin stores a record similar to:
-
-```json
-{
-  "localPath": "00-Inbox/example.md",
-  "contentHash": "2c8f...",
-  "remoteLocation": "custom-documents/example.md-uuid.json",
-  "remoteName": "example.md-uuid.json",
-  "workspaceSlug": "personal-knowledge",
-  "lastSyncedAt": 1789660800000
-}
+```text
+main.js
+manifest.json
 ```
 
-That remote `location` is the important handle needed later for update/delete synchronization.
+Then enable **AnythingLLM Sync** in Obsidian → Settings → Community plugins.
+
+## Configure
+
+1. Open AnythingLLM → Settings → Developer API and create an API key.
+2. Open Obsidian → Settings → AnythingLLM Sync.
+3. Set the AnythingLLM URL, for example `http://localhost:3001`.
+4. Create/select the API key through Obsidian SecretStorage.
+5. Test the connection.
+6. Refresh workspaces and select the target workspace.
+7. Set a vault-relative watch folder such as `00-Inbox`.
+8. Enable automatic sync.
+
+## Commands
+
+- **AnythingLLM Sync: Sync current note to AnythingLLM**
+- **AnythingLLM Sync: Sync watched folder to AnythingLLM**
+
+## Sync behavior
+
+| Obsidian action | AnythingLLM behavior |
+| --- | --- |
+| Create Markdown | Upload + embed |
+| Edit Markdown | Replace Workspace embedding with latest content |
+| Rename Markdown | Re-upload under new filename + replace old embedding |
+| Delete Markdown | Remove old embedding from Workspace |
+| Existing notes | Use bulk sync command |
+
+### Important AnythingLLM behavior
+
+AnythingLLM's public Developer API supports upload and Workspace embedding add/remove operations. The plugin keeps the selected Workspace retrieval state synchronized. AnythingLLM can retain superseded uploaded source objects in its global document storage after an update because there is currently no documented public per-document source-delete endpoint used by this plugin.
 
 ## Development
 
@@ -92,69 +94,23 @@ Production build:
 npm run build
 ```
 
-The build creates `main.js` at the project root.
+This generates `main.js` in the repository root.
 
-## Local installation
+## Release
 
-Create this folder inside the vault you want to use:
+Obsidian expects the GitHub release tag to exactly match `manifest.json` (for example `1.0.0`, not `v1.0.0`). Release assets are:
 
-```text
-<Vault>/.obsidian/plugins/anythingllm-sync/
-```
+- `main.js`
+- `manifest.json`
+- `styles.css` only if a future version adds custom CSS
 
-Copy these files into it:
+The included GitHub Actions workflow builds and publishes those assets when a semantic-version tag is pushed.
 
-```text
-main.js
-manifest.json
-```
+## Privacy
 
-Reload Obsidian, then open **Settings → Community plugins** and enable **AnythingLLM Sync**.
-
-## Configuration
-
-Open **Settings → AnythingLLM Sync** and configure:
-
-1. **AnythingLLM URL** — for example `http://localhost:3001`
-2. **Developer API key** — generated in AnythingLLM Settings → Developer API
-3. **Refresh workspaces** → select the target workspace by name
-4. **Watch folder** — for example `00-Inbox`
-5. Enable **Automatic sync**
-
-The Obsidian vault name does not need to be configured. Each plugin installation already runs inside one specific vault and keeps its own settings.
-
-## v0.2 scope
-
-Current automatic behavior is intentionally limited to newly created Markdown files. Existing synced notes are not re-uploaded when changed until true update synchronization is implemented.
-
-Planned follow-ups:
-
-- Update remote content after local note modification.
-- Delete remote document after local deletion.
-- Preserve mapping after local rename.
-- Retry queue and visible sync status.
-- Multiple folder → workspace mappings.
-- Optional frontmatter filters, e.g. only sync `source_type: web-clipper`.
-
-## AnythingLLM API behavior
-
-The plugin uploads Markdown through the Developer API endpoint:
-
-```text
-POST /api/v1/document/upload
-```
-
-It sends `addToWorkspaces` with the selected workspace slug. The upload response contains a generated document `location`, which is persisted locally for future synchronization operations.
-
-## Security
-
-The AnythingLLM Developer API key is stored in the current vault's plugin data:
-
-```text
-.obsidian/plugins/anythingllm-sync/data.json
-```
-
-Do not commit that file to Git or share it publicly.
+- Notes are sent only to the AnythingLLM URL you configure.
+- The API key is stored in Obsidian SecretStorage rather than plugin `data.json`.
+- The plugin contains no analytics or telemetry.
 
 ## License
 

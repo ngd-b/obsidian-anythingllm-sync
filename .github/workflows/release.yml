@@ -16,12 +16,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - run: npm install
+      - name: Verify tag matches manifest
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const tag = process.env.GITHUB_REF_NAME;
+          if (manifest.version !== tag) {
+            console.error(`Tag ${tag} does not match manifest version ${manifest.version}`);
+            process.exit(1);
+          }
+          NODE
       - run: npm run build
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            main.js
-            manifest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes main.js manifest.json

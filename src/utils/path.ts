@@ -9,7 +9,6 @@ export function cleanVaultFolder(folder: string): string {
 export function isPathInsideFolder(filePath: string, folder: string): boolean {
   const cleanFolder = cleanVaultFolder(folder);
   if (!cleanFolder) return false;
-
   const normalizedFile = normalizePath(filePath);
   return normalizedFile === cleanFolder || normalizedFile.startsWith(`${cleanFolder}/`);
 }

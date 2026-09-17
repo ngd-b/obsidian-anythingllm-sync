@@ -11,31 +11,45 @@ export class VaultListener {
     private readonly plugin: Plugin,
     private readonly syncService: SyncService,
     private readonly store: PluginStore,
-    private readonly onAutoSyncSuccess: (file: TFile) => void,
-    private readonly onAutoSyncError: (file: TFile, error: unknown) => void,
+    private readonly onSuccess: (message: string) => void,
+    private readonly onError: (message: string, error: unknown) => void
   ) {}
 
   register(): void {
     this.plugin.registerEvent(
-      this.plugin.app.vault.on("create", (file) => {
-        this.handleCandidate(file);
-      }),
+      this.plugin.app.vault.on("create", (file) => this.handleCandidate(file))
     );
 
-    // A new Obsidian note is often created before its content is written.
-    // Web Clipper can also emit create first and then one or more modify events.
-    // Debounce both events so we sync only after the initial write settles.
     this.plugin.registerEvent(
-      this.plugin.app.vault.on("modify", (file) => {
-        // v0.2.2 uses modify only to finish the FIRST sync.
-        // Updating already-synced remote documents remains intentionally disabled.
-        if (file instanceof TFile && this.store.getSyncRecord(file.path)) return;
-        this.handleCandidate(file);
-      }),
+      this.plugin.app.vault.on("modify", (file) => this.handleCandidate(file))
     );
 
-    // Future delete/rename support belongs here, while SyncService stays
-    // responsible for synchronization decisions and AnythingLLMClient stays API-only.
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("delete", (file) => {
+        if (!this.store.settings.autoSync) return;
+        if (!isPathInsideFolder(file.path, this.store.settings.watchFolder)) return;
+        this.cancel(file.path);
+        void this.syncService
+          .deleteByPath(file.path)
+          .then((result) => {
+            if (result.status === "deleted") this.onSuccess(`Removed ${file.name} from AnythingLLM`);
+          })
+          .catch((error) => this.onError(`Failed to remove ${file.name}`, error));
+      })
+    );
+
+    this.plugin.registerEvent(
+      this.plugin.app.vault.on("rename", (file, oldPath) => {
+        if (!this.store.settings.autoSync) return;
+        this.cancel(oldPath);
+        this.cancel(file.path);
+        if (!(file instanceof TFile) || file.extension.toLowerCase() !== "md") {
+          void this.syncService.deleteByPath(oldPath).catch((error) => this.onError(`Failed to handle rename of ${file.name}`, error));
+          return;
+        }
+        this.schedule(file, oldPath);
+      })
+    );
   }
 
   dispose(): void {
@@ -49,25 +63,37 @@ export class VaultListener {
     if (!(file instanceof TFile)) return;
     if (file.extension.toLowerCase() !== "md") return;
     if (!isPathInsideFolder(file.path, settings.watchFolder)) return;
-
     this.schedule(file);
   }
 
-  private schedule(file: TFile): void {
-    const previous = this.timers.get(file.path);
-    if (previous !== undefined) window.clearTimeout(previous);
+  private schedule(file: TFile, oldPath?: string): void {
+    const key = oldPath ?? file.path;
+    this.cancel(key);
+    if (key !== file.path) this.cancel(file.path);
 
     const delay = Math.max(0, Math.min(this.store.settings.syncDelayMs, 30_000));
     const timer = window.setTimeout(() => {
-      this.timers.delete(file.path);
-      void this.syncService
-        .syncFile(file, "auto")
+      this.timers.delete(key);
+      const task = oldPath
+        ? this.syncService.handleRename(file, oldPath)
+        : this.syncService.syncFile(file, "auto");
+
+      void task
         .then((result) => {
-          if (result.status === "synced") this.onAutoSyncSuccess(file);
+          if (result.status === "synced") {
+            const verb = result.operation === "created" ? "Synced" : result.operation === "updated" ? "Updated" : "Moved";
+            this.onSuccess(`${verb} ${file.name}`);
+          }
         })
-        .catch((error) => this.onAutoSyncError(file, error));
+        .catch((error) => this.onError(`Failed to sync ${file.name}`, error));
     }, delay);
 
-    this.timers.set(file.path, timer);
+    this.timers.set(key, timer);
+  }
+
+  private cancel(path: string): void {
+    const timer = this.timers.get(path);
+    if (timer !== undefined) window.clearTimeout(timer);
+    this.timers.delete(path);
   }
 }
