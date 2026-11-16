@@ -75,7 +75,7 @@ test("right-click sync targets the clicked Markdown file rather than the active 
     return { status: "synced", operation: "created" };
   };
   const items = itemsFor(target);
-  assert.equal(items.length, 1);
+  assert.equal(items.length, 2);
   assert.equal(items[0].title, "Sync file to AnythingLLM");
   await items[0].click();
   assert.equal(synced.file, target);
@@ -112,4 +112,19 @@ test("folder sync errors close the progress notice and display the failure", asy
   await itemsFor(new TFolder("Archive"))[0].click();
   assert.ok(Notice.all.find((notice) => notice.duration === 0).hidden);
   assert.ok(Notice.all.some((notice) => notice.message.includes("workspace not selected")));
+});
+
+test("folder remote-check menu targets the clicked folder and reports missing notes", async () => {
+  const { plugin, itemsFor } = await setup();
+  const folder = new TFolder("Archive");
+  let checked;
+  plugin.syncService.checkFolder = async (target) => {
+    checked = target;
+    return { present: 1, missing: 2, failed: 0, skipped: 3 };
+  };
+  const item = itemsFor(folder).find((item) => item.title === "Check remote sync status");
+  await item.click();
+  assert.equal(checked, folder);
+  assert.ok(Notice.all.some((notice) => notice.message.includes("2 missing (sync again)")));
+  assert.ok(Notice.all.find((notice) => notice.duration === 0).hidden);
 });

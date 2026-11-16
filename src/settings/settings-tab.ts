@@ -85,6 +85,16 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
         heading: "Maintenance",
         items: [
           {
+            name: "Check remote sync status",
+            desc: "Check whether tracked notes still exist in their AnythingLLM workspaces. Missing notes can be restored by syncing again.",
+            action: async (el) => {
+              const button = findButton(el);
+              if (button) button.disabled = true;
+              try { await this.syncPlugin.checkRemoteWithNotice(); }
+              finally { if (button) button.disabled = false; }
+            }
+          },
+          {
             name: "Sync watched folders now",
             desc: "Upload or update Markdown notes in all selected folders. Overlapping folders are synced once.",
             action: async (el) => {

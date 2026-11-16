@@ -5,6 +5,8 @@ import { AnythingLLMClient } from "./services/anythingllm-client";
 import { SyncService } from "./services/sync-service";
 import { PluginStore } from "./store/plugin-store";
 import type { WorkspaceOption } from "./types";
+import { FileStatusDecorations } from "./ui/file-status-decorations";
+import { SyncStatusModal } from "./ui/sync-status-modal";
 
 export default class AnythingLLMSyncPlugin extends Plugin {
   store!: PluginStore;
@@ -12,6 +14,7 @@ export default class AnythingLLMSyncPlugin extends Plugin {
   syncService!: SyncService;
   workspaceCache: WorkspaceOption[] = [];
   private vaultListener?: VaultListener;
+  private fileStatuses?: FileStatusDecorations;
 
   async onload(): Promise<void> {
     this.store = new PluginStore(this);
@@ -38,11 +41,14 @@ export default class AnythingLLMSyncPlugin extends Plugin {
         }
       );
       this.vaultListener.register();
+      this.fileStatuses = new FileStatusDecorations(this, this.syncService, this.store);
+      this.fileStatuses.register();
     });
   }
 
   onunload(): void {
     this.vaultListener?.dispose();
+    this.fileStatuses?.dispose();
   }
 
   clearWorkspaceCache(): void {
@@ -62,6 +68,18 @@ export default class AnythingLLMSyncPlugin extends Plugin {
     return this.syncService.syncWatchedFolder();
   }
 
+  async checkRemoteWithNotice(folder?: TFolder): Promise<void> {
+    const progress = new Notice("AnythingLLM Sync: checking remote documents…", 0);
+    try {
+      const result = folder ? await this.syncService.checkFolder(folder) : await this.syncService.checkTrackedFiles();
+      new Notice(`AnythingLLM Sync: ${result.present} present, ${result.missing} missing (sync again), ${result.failed} failed, ${result.skipped} skipped.`, 8000);
+    } catch (error) {
+      new Notice(`Remote check failed: ${errorMessage(error)}`, 8000);
+    } finally {
+      progress.hide();
+    }
+  }
+
   private registerCommands(): void {
     this.addCommand({
       id: "sync-current-note",
@@ -79,6 +97,11 @@ export default class AnythingLLMSyncPlugin extends Plugin {
       name: "Sync watched folders to AnythingLLM",
       callback: () => void this.runBulkSync()
     });
+    this.addCommand({
+      id: "check-remote-sync-status",
+      name: "Check tracked notes in AnythingLLM",
+      callback: () => void this.checkRemoteWithNotice()
+    });
   }
 
   private registerContextMenu(): void {
@@ -88,11 +111,15 @@ export default class AnythingLLMSyncPlugin extends Plugin {
           .setTitle("Sync folder to AnythingLLM")
           .setIcon("refresh-cw")
           .onClick(() => this.runBulkSync(file)));
+        menu.addItem((item) => item.setTitle("Check remote sync status").setIcon("search")
+          .onClick(() => this.checkRemoteWithNotice(file)));
       } else if (file instanceof TFile && file.extension.toLowerCase() === "md") {
         menu.addItem((item) => item
           .setTitle("Sync file to AnythingLLM")
           .setIcon("refresh-cw")
           .onClick(() => this.runManualSync(file)));
+        menu.addItem((item) => item.setTitle("Check sync status").setIcon("search")
+          .onClick(() => { new SyncStatusModal(this.app, file, this.syncService, this.store).open(); }));
       }
     }));
   }

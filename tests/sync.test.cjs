@@ -9,6 +9,7 @@ class TFile {
     this.path = path;
     this.name = path.split("/").pop();
     this.extension = this.name.split(".").pop();
+    this.stat = { mtime: 1, size: 12 };
   }
 }
 
@@ -53,6 +54,7 @@ function setup() {
     settings: { baseUrl: "http://localhost:3001", workspaceSlug: "wiki", watchFolders: ["Inbox"], autoSync: true, syncDelayMs: 1000 },
     apiKey: "test-key",
     getSyncRecord: (path) => records.get(path),
+    getAllSyncRecords: () => [...records.values()],
     setSyncRecord: async (record) => { records.set(record.localPath, record); },
     replaceSyncRecord: async (oldPath, record) => {
       records.delete(oldPath);
@@ -61,6 +63,7 @@ function setup() {
     deleteSyncRecord: async (path) => { records.delete(path); }
   };
   const client = {
+    listWorkspaceDocuments: async () => new Set(active),
     uploadMarkdown: async (params) => {
       uploads.push(params);
       return { location: `doc-${uploads.length}`, name: params.filename };
@@ -73,6 +76,7 @@ function setup() {
   const folders = new Map();
   const app = { vault: {
     getFolderByPath: (path) => folders.get(path) ?? null,
+    getAbstractFileByPath: (path) => [...folders.values()].flatMap((folder) => folder.children).find((file) => file.path === path) ?? null,
     read: async () => content,
     on: (event, handler) => { handlers[event] = handler; }
   } };
@@ -460,4 +464,170 @@ test("failed settings save restores the previous folders", async () => {
   s.fail(true);
   await assert.rejects(s.store.updateSettings({ watchFolders: ["Knowledge"] }), /disk full/);
   assert.deepEqual(Array.from(s.store.settings.watchFolders), ["Inbox"]);
+});
+
+test("file status distinguishes unsynced, matching content and local edits", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  assert.equal((await s.service.getFileStatus(file)).state, "unsynced");
+  await s.service.syncFile(file, "manual");
+  assert.equal((await s.service.getFileStatus(file)).state, "synced");
+  s.setContent("edited content");
+  s.service.invalidateFileStatus(file);
+  assert.equal((await s.service.getFileStatus(file)).state, "modified");
+  await s.service.syncFile(file, "manual");
+  assert.equal((await s.service.getFileStatus(file)).state, "synced");
+});
+
+test("status hashing is cached and invalidated by file events", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "manual");
+  const read = s.app.vault.read;
+  let reads = 0;
+  s.app.vault.read = async (file) => { reads++; return read(file); };
+  await s.service.getFileStatus(file);
+  await s.service.getFileStatus(file);
+  assert.equal(reads, 1);
+  s.service.invalidateFileStatus(file);
+  await s.service.getFileStatus(file);
+  assert.equal(reads, 2);
+});
+
+test("a late hash read cannot repopulate an invalidated cache with old content", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "manual");
+  let finish;
+  let reads = 0;
+  s.app.vault.read = async () => {
+    if (++reads === 1) return new Promise((resolve) => { finish = resolve; });
+    return "edited content";
+  };
+  const oldRead = s.service.getFileStatus(file);
+  // Some filesystem events preserve size and timestamp; event invalidation must
+  // still defeat a read that started before the event.
+  s.service.invalidateFileStatus(file);
+  finish("note content");
+  await oldRead;
+  assert.equal((await s.service.getFileStatus(file)).state, "modified");
+  assert.equal(reads, 2);
+});
+
+test("upload progress and failures appear in the file status", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  const started = deferred();
+  const gate = deferred();
+  s.client.uploadMarkdown = async () => { started.resolve(); await gate.promise; throw new Error("upload failed"); };
+  const task = s.service.syncFile(file, "manual");
+  await started.promise;
+  assert.equal((await s.service.getFileStatus(file)).state, "syncing");
+  s.service.invalidateFileStatus(file);
+  assert.equal((await s.service.getFileStatus(file)).state, "syncing");
+  gate.resolve();
+  await assert.rejects(task, /upload failed/);
+  assert.equal((await s.service.getFileStatus(file)).state, "error");
+});
+
+test("remote check finds removed documents and unchanged sync restores them", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "manual");
+  s.active.clear();
+  const result = await s.service.checkFiles([file]);
+  assert.equal(result.missing, 1);
+  assert.equal(s.records.get(file.path).remoteMissing, true);
+  assert.ok(s.records.get(file.path).lastCheckedAt);
+  assert.equal((await s.service.getFileStatus(file)).state, "missing");
+  await s.service.syncFile(file, "manual");
+  assertSingleDocument(s, file.path);
+  assert.equal(s.uploads.length, 2);
+  assert.equal((await s.service.getFileStatus(file)).state, "synced");
+});
+
+test("batch remote checks query each workspace once and skip untracked files", async () => {
+  const s = setup();
+  const files = [new TFile("Inbox/a.md"), new TFile("Inbox/b.md")];
+  for (const file of files) await s.service.syncFile(file, "manual");
+  let queries = 0;
+  s.client.listWorkspaceDocuments = async () => { queries++; return new Set(s.active); };
+  const result = await s.service.checkFiles([...files, files[0], new TFile("Inbox/new.md")]);
+  assert.equal(queries, 1);
+  assert.equal(result.present, 2);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.failed, 0);
+});
+
+test("failed remote checks never mark a document as removed", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "manual");
+  s.client.listWorkspaceDocuments = async () => { throw new Error("offline"); };
+  const result = await s.service.checkFiles([file]);
+  assert.equal(result.failed, 1);
+  assert.equal(result.missing, 0);
+  assert.equal(s.records.get(file.path).remoteMissing, undefined);
+  assert.equal(s.records.get(file.path).lastCheckedAt, undefined);
+  assert.equal((await s.service.getFileStatus(file)).state, "error");
+  assertSingleDocument(s, file.path);
+});
+
+test("a check queued behind an upload cannot mark the new upload missing", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "manual");
+  s.setContent("changed");
+  const started = deferred();
+  const gate = deferred();
+  const upload = s.client.uploadMarkdown;
+  s.client.uploadMarkdown = async (params) => { started.resolve(); await gate.promise; return upload(params); };
+  const sync = s.service.syncFile(file, "manual");
+  await started.promise;
+  const check = s.service.checkFiles([file]);
+  gate.resolve();
+  await sync;
+  const result = await check;
+  assert.equal(result.skipped, 1);
+  assert.equal(result.missing, 0);
+  assertSingleDocument(s, file.path);
+});
+
+test("connection changes during a check discard its remote result", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "manual");
+  const started = deferred();
+  const gate = deferred();
+  s.client.listWorkspaceDocuments = async () => { started.resolve(); await gate.promise; return new Set(); };
+  const check = s.service.checkFiles([file]);
+  await started.promise;
+  s.store.settings.baseUrl = "http://different-server:3001";
+  gate.resolve();
+  const result = await check;
+  assert.equal(result.failed, 1);
+  assert.equal(s.records.get(file.path).remoteMissing, undefined);
+});
+
+test("remote presence does not hide pending local changes or a workspace switch", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "manual");
+  s.setContent("new local content");
+  const check = await s.service.checkFiles([file]);
+  assert.equal(check.present, 1);
+  assert.equal((await s.service.getFileStatus(file)).state, "modified");
+  s.store.settings.workspaceSlug = "other";
+  assert.equal((await s.service.getFileStatus(file)).state, "modified");
+});
+
+test("remote check metadata survives reloading the plugin store", async () => {
+  const s = persistedStore(null);
+  await s.store.load();
+  await s.store.setSyncRecord({ localPath: "Inbox/a.md", contentHash: "hash", remoteLocation: "doc-1",
+    workspaceSlug: "wiki", lastSyncedAt: 1, remoteMissing: true, lastCheckedAt: 2 });
+  const reloaded = persistedStore(s.saved());
+  await reloaded.store.load();
+  assert.equal(reloaded.store.getSyncRecord("Inbox/a.md").remoteMissing, true);
+  assert.equal(reloaded.store.getSyncRecord("Inbox/a.md").lastCheckedAt, 2);
 });

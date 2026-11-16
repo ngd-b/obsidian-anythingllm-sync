@@ -22,6 +22,22 @@ export interface SyncRecord {
   workspaceSlug: string;
   lastSyncedAt: number;
   pendingRename?: boolean;
+  remoteMissing?: boolean;
+  lastCheckedAt?: number;
+}
+
+export type FileSyncState = "unsynced" | "synced" | "modified" | "syncing" | "missing" | "checking" | "error";
+
+export interface FileSyncStatus {
+  state: FileSyncState;
+  message: string;
+}
+
+export interface RemoteCheckSummary {
+  present: number;
+  missing: number;
+  failed: number;
+  skipped: number;
 }
 
 export interface PersistedPluginData {

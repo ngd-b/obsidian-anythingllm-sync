@@ -15,6 +15,7 @@ interface LegacyData {
 export class PluginStore {
   private data: PersistedPluginData = structuredClone(DEFAULT_DATA);
   private writeQueue: Promise<void> = Promise.resolve();
+  private readonly listeners = new Set<() => void>();
 
   constructor(private readonly plugin: Plugin) {}
 
@@ -70,6 +71,11 @@ export class PluginStore {
     return Object.values(this.data.syncRecords);
   }
 
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   async updateSettings(patch: Partial<AnythingLLMSyncSettings>): Promise<void> {
     const previous = this.data.settings;
     const next = {
@@ -82,6 +88,7 @@ export class PluginStore {
       await this.persist();
     } catch (error) {
       if (this.data.settings === next) this.data.settings = previous;
+      this.notify();
       throw error;
     }
   }
@@ -108,6 +115,11 @@ export class PluginStore {
       .catch(() => undefined)
       .then(() => this.plugin.saveData(snapshot));
     await this.writeQueue;
+    this.notify();
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
   }
 }
 

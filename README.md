@@ -27,6 +27,7 @@ AI answers from your notes
 - Bulk sync existing Markdown files.
 - Manual sync command for the active note.
 - Right-click a Markdown file to sync it, or a folder to recursively sync its Markdown notes.
+- Show file-explorer sync badges, inspect a note's status in a dialog, and check whether remote workspace documents have been removed.
 - Secure Developer API key storage using Obsidian SecretStorage.
 - Per-vault settings and sync state.
 
@@ -71,8 +72,17 @@ Use **Sync watched folders now** to upload existing notes. With no folders selec
 
 - **AnythingLLM Sync: Sync current note to AnythingLLM**
 - **AnythingLLM Sync: Sync watched folders to AnythingLLM**
+- **AnythingLLM Sync: Check tracked notes in AnythingLLM**
 
 In the file explorer, right-click a Markdown file and choose **Sync file to AnythingLLM**, or right-click a folder and choose **Sync folder to AnythingLLM**. Folder sync includes subfolders, skips unsupported files, and reports synced, skipped and failed counts. These are one-time actions that also work outside watched folders and with automatic sync disabled; they do not change your watch-folder selection.
+
+## Sync status and remote checks
+
+Markdown files show a status badge in the file explorer: **Not synced**, **Synced**, **Needs sync**, **Syncing**, **Checking**, **Remote missing**, or **Error**. Click the badge or right-click → **Check sync status** to open a dialog with details, **Check remote**, and **Sync now**. Errors and retries stay in that dialog.
+
+**Synced** means the local content matches the last upload. Remote presence reflects the last explicit check, not continuous polling; the tooltip and dialog show when it was checked. To check a folder recursively, use its **Check remote sync status** context-menu action. The settings maintenance action and command check all tracked notes still present in the vault, including notes manually synced outside watched folders. Each check fetches each involved workspace's document list once.
+
+When a check finds a document missing from its workspace, its badge changes to **Remote missing**. Syncing the file or folder again restores missing nonempty notes even when their content has not changed. A network, authentication or response-format failure reports **Error** and does not mark notes as remotely missing. Checks verify workspace document membership; they do not audit individual vectors or the integrity of global source storage.
 
 ## Sync behavior
 

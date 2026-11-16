@@ -43,6 +43,14 @@ The folder picker edits a draft selection in a modal and saves only on confirmat
 
 File explorer context menus use Obsidian's registered `file-menu` event. Markdown file actions reuse manual sync; folder actions recursively collect Markdown notes and reuse the bulk sync loop. These actions operate on the clicked file or folder independently of the active note and automatic watch scope, without changing settings. Folder operations show an in-progress notice and final synced/skipped/failed counts.
 
+## Status and remote verification
+
+SyncService exposes status subscriptions and caches local content hashes by file object, modification time and size. Vault events invalidate those hashes even when automatic sync is disabled. Store changes and in-flight operations refresh the explorer badges. The explorer adapter is isolated in `src/ui/file-status-decorations.ts`, since Obsidian does not expose a public decoration API; it observes file-explorer DOM changes, ignores its own badge mutations and removes observers and badges on unload. Revision checks discard stale asynchronous status reads. Status details and per-file check/resync feedback stay in a modal.
+
+Explicit remote checks use `GET /api/v1/workspace/:slug` and match each record's `remoteLocation` against the returned document `docpath`. The API client rejects missing workspaces, malformed document lists and non-200 responses rather than interpreting them as an empty workspace. Checks use each record's original workspace, fetch each workspace once per batch, and run record updates in the same path queue as uploads and renames. Snapshot identity and connection checks prevent an old response from marking a newer upload missing.
+
+`remoteMissing` and `lastCheckedAt` are optional persisted record fields. Only successful checks update them. The unchanged-content shortcut is disabled for a missing document; successful sync replaces the record and clears the missing marker. Network failures leave presence metadata unchanged and surface an error status. A synced badge describes local content against the last upload, while remote membership is only known as of the last explicit check. No polling or individual-vector integrity check is performed.
+
 AnythingLLM's documented public API exposes workspace embedding management, but not a documented endpoint for permanently deleting each superseded source object from global document storage. Therefore this plugin guarantees Workspace retrieval synchronization; stale source objects can remain in AnythingLLM's global document storage after updates.
 
 ## Security

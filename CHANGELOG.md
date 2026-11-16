@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add file-explorer status badges and a note status dialog with remote verification and resync actions.
+- Check tracked notes or folders against remote workspace documents, persist missing-document markers, and restore missing notes on the next sync even if their content is unchanged.
 - Add right-click actions to sync a Markdown file or recursively sync a folder, including folders outside the automatic watch scope.
 - Select multiple watch folders in a modal folder tree with checkboxes and explicit confirmation; migrate existing single-folder settings automatically.
 - Deduplicate overlapping folder selections and preserve sync mappings when moving notes between watched folders.

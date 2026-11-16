@@ -1,7 +1,7 @@
 import { TFile, TFolder, type App } from "obsidian";
-import type { DeleteResult, SyncOrigin, SyncRecord, SyncResult } from "../types";
+import type { DeleteResult, FileSyncStatus, RemoteCheckSummary, SyncOrigin, SyncRecord, SyncResult } from "../types";
 import { hashContent } from "../utils/hash";
-import { isPathInsideWatchFolders, normalizeWatchFolders } from "../utils/path";
+import { isPathInsideWatchFolders, normalizeBaseUrl, normalizeWatchFolders } from "../utils/path";
 import { AnythingLLMClient } from "./anythingllm-client";
 import { PluginStore } from "../store/plugin-store";
 
@@ -19,6 +19,10 @@ function collectMarkdownFiles(folder: TFolder, out: TFile[] = []): TFile[] {
 
 export class SyncService {
   private readonly queues = new Map<string, Promise<unknown>>();
+  private readonly statuses = new Map<string, FileSyncStatus>();
+  private readonly listeners = new Set<() => void>();
+  private readonly hashes = new WeakMap<TFile, { mtime: number; size: number; hash: string }>();
+  private readonly hashVersions = new WeakMap<TFile, number>();
 
   constructor(
     private readonly app: App,
@@ -27,16 +31,17 @@ export class SyncService {
   ) {}
 
   syncFile(file: TFile, origin: SyncOrigin, previousPath?: string): Promise<SyncResult> {
+    this.invalidateHash(file);
     const path = file.path;
     const filename = file.name;
     const extension = file.extension;
-    return this.enqueue([previousPath ?? path, path], () =>
-      this.syncFileUnlocked(file, origin, path, filename, extension, previousPath)
+    return this.enqueue([previousPath ?? path, path], () => this.withStatus(path, "syncing", () =>
+      this.syncFileUnlocked(file, origin, path, filename, extension, previousPath))
     );
   }
 
   deleteByPath(localPath: string): Promise<DeleteResult> {
-    return this.enqueue([localPath], () => this.deleteByPathUnlocked(localPath));
+    return this.enqueue([localPath], () => this.withStatus(localPath, "syncing", () => this.deleteByPathUnlocked(localPath)));
   }
 
   handleRename(file: TFile, oldPath: string): Promise<SyncResult | DeleteResult> {
@@ -44,9 +49,120 @@ export class SyncService {
     const filename = file.name;
     const extension = file.extension;
     // Reserve both paths immediately, so edits and subsequent renames wait for this move.
-    return this.enqueue([oldPath, path], () =>
-      this.handleRenameUnlocked(file, oldPath, path, filename, extension)
+    return this.enqueue([oldPath, path], () => this.withStatus(path, "syncing", () =>
+      this.handleRenameUnlocked(file, oldPath, path, filename, extension))
     );
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  invalidateFileStatus(file: TFile): void {
+    this.invalidateHash(file);
+    if (this.statuses.get(file.path)?.state === "error") this.statuses.delete(file.path);
+    this.notify();
+  }
+
+  private invalidateHash(file: TFile): void {
+    this.hashes.delete(file);
+    this.hashVersions.set(file, (this.hashVersions.get(file) ?? 0) + 1);
+  }
+
+  async getFileStatus(file: TFile): Promise<FileSyncStatus> {
+    const transient = this.statuses.get(file.path);
+    if (transient) return transient;
+    const record = this.store.getSyncRecord(file.path);
+    if (!record) return { state: "unsynced", message: "This note has not been synchronized." };
+    if (record.workspaceSlug !== this.store.settings.workspaceSlug) {
+      return { state: "modified", message: "This note needs to be synchronized to the selected workspace." };
+    }
+    if (record.remoteMissing) return { state: "missing", message: "The document is missing from its AnythingLLM workspace. Sync again to restore it." };
+    try {
+      const { mtime, size } = file.stat;
+      let cached = this.hashes.get(file);
+      if (!cached || cached.mtime !== mtime || cached.size !== size) {
+        const version = this.hashVersions.get(file) ?? 0;
+        const hash = hashContent(await this.app.vault.read(file));
+        cached = { mtime, size, hash };
+        if ((this.hashVersions.get(file) ?? 0) === version && file.stat.mtime === mtime && file.stat.size === size) this.hashes.set(file, cached);
+        else return { state: "modified", message: "This note changed while its status was being checked." };
+      }
+      if (record.pendingRename || cached.hash !== record.contentHash) {
+        return { state: "modified", message: "Local changes need to be synchronized." };
+      }
+      return { state: "synced", message: record.lastCheckedAt
+        ? `Local content matches the last upload. Remote presence last checked: ${new Date(record.lastCheckedAt).toLocaleString()}.`
+        : "Local content matches the last upload. Remote presence has not been checked; use Check sync status." };
+    } catch (error) {
+      return { state: "error", message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  checkFolder(folder: TFolder): Promise<RemoteCheckSummary> {
+    return this.checkFiles(collectMarkdownFiles(folder));
+  }
+
+  checkTrackedFiles(): Promise<RemoteCheckSummary> {
+    const files = this.store.getAllSyncRecords().map((record) => this.app.vault.getAbstractFileByPath(record.localPath))
+      .filter((file): file is TFile => file instanceof TFile && file.extension.toLowerCase() === "md");
+    return this.checkFiles(files);
+  }
+
+  async checkFiles(files: TFile[]): Promise<RemoteCheckSummary> {
+    const summary: RemoteCheckSummary = { present: 0, missing: 0, failed: 0, skipped: 0 };
+    const documents = new Map<string, Promise<Set<string>>>();
+    const connection = this.connectionKey();
+    const snapshots = [...new Map(files.map((file) => [file.path, file])).values()]
+      .map((file) => ({ path: file.path, record: this.store.getSyncRecord(file.path) }));
+    for (const { path, record } of snapshots) {
+      if (!record) { summary.skipped += 1; continue; }
+      try {
+        await this.enqueue([path], () => this.withStatus(path, "checking", async () => {
+          if (this.store.getSyncRecord(path) !== record) { summary.skipped += 1; return; }
+          if (connection !== this.connectionKey()) throw new Error("Connection settings changed; check again.");
+          let request = documents.get(record.workspaceSlug);
+          if (!request) {
+            request = this.client.listWorkspaceDocuments(record.workspaceSlug);
+            documents.set(record.workspaceSlug, request);
+          }
+          const locations = await request;
+          if (connection !== this.connectionKey()) throw new Error("Connection settings changed; check again.");
+          if (this.store.getSyncRecord(path) !== record) { summary.skipped += 1; return; }
+          const remoteMissing = !locations.has(record.remoteLocation);
+          await this.store.setSyncRecord({ ...record, remoteMissing, lastCheckedAt: Date.now() });
+          if (remoteMissing) summary.missing += 1;
+          else summary.present += 1;
+        }));
+      } catch {
+        summary.failed += 1;
+      }
+    }
+    return summary;
+  }
+
+  private connectionKey(): string {
+    return `${normalizeBaseUrl(this.store.settings.baseUrl)}\0${this.store.apiKey}`;
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  private async withStatus<T>(path: string, state: "syncing" | "checking", task: () => Promise<T>): Promise<T> {
+    this.statuses.set(path, { state, message: state === "syncing" ? "Synchronizing with AnythingLLM…" : "Checking remote presence…" });
+    this.notify();
+    try {
+      const result = await task();
+      this.statuses.delete(path);
+      return result;
+    } catch (error) {
+      this.statuses.set(path, { state: "error", message: error instanceof Error ? error.message : String(error) });
+      throw error;
+    } finally {
+      this.notify();
+    }
   }
 
   async syncWatchedFolder(): Promise<{ synced: number; skipped: number; failed: number }> {
@@ -117,6 +233,7 @@ export class SyncService {
     if (
       existing &&
       !existing.pendingRename &&
+      !existing.remoteMissing &&
       existing.contentHash === contentHash &&
       existing.workspaceSlug === targetWorkspace &&
       existing.localPath === path &&

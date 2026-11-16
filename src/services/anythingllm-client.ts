@@ -81,6 +81,28 @@ export class AnythingLLMClient {
     return document;
   }
 
+  async listWorkspaceDocuments(workspaceSlug: string): Promise<Set<string>> {
+    this.validateConnectionSettings();
+    if (!workspaceSlug.trim()) throw new Error("AnythingLLM workspace is not selected.");
+    const response = await requestUrl({
+      url: `${this.apiBase()}/v1/workspace/${encodeURIComponent(workspaceSlug)}`,
+      method: "GET",
+      headers: this.authHeaders(),
+      throw: false
+    });
+    if (response.status !== 200) {
+      throw new Error(this.responseError(response.status, response.text, response.json));
+    }
+    const payload = response.json as { workspace?: Array<{ slug?: string; documents?: Array<{ docpath?: string }> }> } | null;
+    if (!Array.isArray(payload?.workspace)) throw new Error("Unexpected AnythingLLM workspace response.");
+    const workspace = payload.workspace.find((item) => item?.slug === workspaceSlug);
+    if (!workspace) throw new Error(`AnythingLLM workspace no longer exists: ${workspaceSlug}`);
+    if (!Array.isArray(workspace.documents) || workspace.documents.some((doc) => !doc || typeof doc.docpath !== "string" || !doc.docpath)) {
+      throw new Error("AnythingLLM did not return a valid document list; remote presence is unknown.");
+    }
+    return new Set(workspace.documents.map((doc) => doc.docpath!));
+  }
+
   async updateWorkspaceEmbeddings(params: {
     workspaceSlug: string;
     adds?: string[];
