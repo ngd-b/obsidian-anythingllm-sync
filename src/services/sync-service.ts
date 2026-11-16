@@ -27,16 +27,26 @@ export class SyncService {
   ) {}
 
   syncFile(file: TFile, origin: SyncOrigin, previousPath?: string): Promise<SyncResult> {
-    const queueKey = previousPath ?? file.path;
-    return this.enqueue(queueKey, () => this.syncFileUnlocked(file, origin, previousPath));
+    const path = file.path;
+    const filename = file.name;
+    const extension = file.extension;
+    return this.enqueue([previousPath ?? path, path], () =>
+      this.syncFileUnlocked(file, origin, path, filename, extension, previousPath)
+    );
   }
 
   deleteByPath(localPath: string): Promise<DeleteResult> {
-    return this.enqueue(localPath, () => this.deleteByPathUnlocked(localPath));
+    return this.enqueue([localPath], () => this.deleteByPathUnlocked(localPath));
   }
 
   handleRename(file: TFile, oldPath: string): Promise<SyncResult | DeleteResult> {
-    return this.enqueue(oldPath, () => this.handleRenameUnlocked(file, oldPath));
+    const path = file.path;
+    const filename = file.name;
+    const extension = file.extension;
+    // Reserve both paths immediately, so edits and subsequent renames wait for this move.
+    return this.enqueue([oldPath, path], () =>
+      this.handleRenameUnlocked(file, oldPath, path, filename, extension)
+    );
   }
 
   async syncWatchedFolder(): Promise<{ synced: number; skipped: number; failed: number }> {
@@ -65,41 +75,56 @@ export class SyncService {
     return { synced, skipped, failed };
   }
 
-  private async syncFileUnlocked(file: TFile, origin: SyncOrigin, previousPath?: string): Promise<SyncResult> {
-    if (file.extension.toLowerCase() !== "md") {
+  private async syncFileUnlocked(
+    file: TFile,
+    origin: SyncOrigin,
+    path: string,
+    filename: string,
+    extension: string,
+    previousPath?: string
+  ): Promise<SyncResult> {
+    if (extension.toLowerCase() !== "md") {
       return { status: "ignored", reason: "unsupported-file" };
     }
-    if (origin === "auto" && !isPathInsideFolder(file.path, this.store.settings.watchFolder)) {
+    if (origin === "auto" && !isPathInsideFolder(path, this.store.settings.watchFolder)) {
       return { status: "ignored", reason: "outside-watch-folder" };
     }
 
     this.validateSyncSettings();
 
     const content = await this.app.vault.read(file);
-    if (!content.trim()) return { status: "skipped", reason: "empty" };
+    const oldPath = previousPath ?? path;
+    const existing = this.store.getSyncRecord(oldPath) ?? this.store.getSyncRecord(path);
+    if (!content.trim()) {
+      // Keep the mapping reachable after a rename, even when there is nothing to upload.
+      if (existing && oldPath !== path) {
+        await this.store.replaceSyncRecord(oldPath, { ...existing, localPath: path, pendingRename: true });
+      }
+      return { status: "skipped", reason: "empty" };
+    }
 
     const contentHash = hashContent(content);
-    const oldPath = previousPath ?? file.path;
-    const existing = this.store.getSyncRecord(oldPath) ?? this.store.getSyncRecord(file.path);
     const targetWorkspace = this.store.settings.workspaceSlug;
 
     if (
       existing &&
+      !existing.pendingRename &&
       existing.contentHash === contentHash &&
       existing.workspaceSlug === targetWorkspace &&
-      oldPath === file.path
+      existing.localPath === path &&
+      (oldPath === path || !this.store.getSyncRecord(oldPath))
     ) {
       return { status: "skipped", reason: "unchanged" };
     }
 
-    const uploaded = await this.client.uploadMarkdown({ filename: file.name, content });
+    const uploaded = await this.client.uploadMarkdown({ filename, content });
 
     if (!existing) {
       await this.client.updateWorkspaceEmbeddings({
         workspaceSlug: targetWorkspace,
         adds: [uploaded.location]
       });
-      const record = this.createRecord(file.path, contentHash, uploaded.location, uploaded.name, targetWorkspace);
+      const record = this.createRecord(path, contentHash, uploaded.location, uploaded.name, targetWorkspace);
       await this.store.setSyncRecord(record);
       return { status: "synced", operation: "created", record };
     }
@@ -133,7 +158,7 @@ export class SyncService {
       }
     }
 
-    const record = this.createRecord(file.path, contentHash, uploaded.location, uploaded.name, targetWorkspace);
+    const record = this.createRecord(path, contentHash, uploaded.location, uploaded.name, targetWorkspace);
     await this.store.replaceSyncRecord(oldPath, record);
     return {
       status: "synced",
@@ -155,27 +180,41 @@ export class SyncService {
     return { status: "deleted", record: existing };
   }
 
-  private async handleRenameUnlocked(file: TFile, oldPath: string): Promise<SyncResult | DeleteResult> {
+  private async handleRenameUnlocked(
+    file: TFile,
+    oldPath: string,
+    path: string,
+    filename: string,
+    extension: string
+  ): Promise<SyncResult | DeleteResult> {
+    const isMarkdown = extension.toLowerCase() === "md";
     const oldInside = isPathInsideFolder(oldPath, this.store.settings.watchFolder);
-    const newInside = isPathInsideFolder(file.path, this.store.settings.watchFolder);
-    if (!oldInside && !newInside) {
+    const newInside = isPathInsideFolder(path, this.store.settings.watchFolder);
+    if (isMarkdown && !oldInside && !newInside) {
       return { status: "ignored", reason: "outside-watch-folder" };
     }
-    if (oldInside && !newInside) {
-      return this.deleteByPathUnlocked(oldPath);
+
+    // The local rename has already happened, even if reading/uploading now fails.
+    // Persist its mapping first so the next edit, rename or delete can find it.
+    const existing = this.store.getSyncRecord(oldPath);
+    if (existing && oldPath !== path) {
+      await this.store.replaceSyncRecord(oldPath, { ...existing, localPath: path, pendingRename: true });
     }
-    if (!oldInside && newInside) {
-      return this.syncFileUnlocked(file, "rename");
+    if (!isMarkdown || (oldInside && !newInside)) {
+      return this.deleteByPathUnlocked(path);
     }
-    return this.syncFileUnlocked(file, "rename", oldPath);
+    return this.syncFileUnlocked(file, "rename", path, filename, extension);
   }
 
-  private enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
-    const previous = this.queues.get(key) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(task);
-    this.queues.set(key, next);
+  private enqueue<T>(paths: string[], task: () => Promise<T>): Promise<T> {
+    const keys = [...new Set(paths)];
+    const previous = keys.map((key) => (this.queues.get(key) ?? Promise.resolve()).catch(() => undefined));
+    const next = Promise.all(previous).then(task);
+    for (const key of keys) this.queues.set(key, next);
     const cleanup = () => {
-      if (this.queues.get(key) === next) this.queues.delete(key);
+      for (const key of keys) {
+        if (this.queues.get(key) === next) this.queues.delete(key);
+      }
     };
     void next.then(cleanup, cleanup);
     return next;

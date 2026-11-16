@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Serialize renames with edits, manual syncs and deletes across both old and new paths to prevent duplicate Workspace documents.
+- Handle folder renames and moves recursively, updating or removing synchronized Markdown descendants as they cross the watch-folder boundary.
+
 ## 1.0.0
 
 - Automatically sync new Markdown notes from a configurable folder.

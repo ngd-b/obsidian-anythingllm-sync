@@ -1,11 +1,11 @@
 import type { Plugin, TAbstractFile } from "obsidian";
-import { TFile } from "obsidian";
+import { TFile, TFolder } from "obsidian";
 import { SyncService } from "../services/sync-service";
 import { PluginStore } from "../store/plugin-store";
 import { isPathInsideFolder } from "../utils/path";
 
 export class VaultListener {
-  private readonly timers = new Map<string, number>();
+  private readonly timers = new Map<TFile, number>();
 
   constructor(
     private readonly plugin: Plugin,
@@ -28,7 +28,7 @@ export class VaultListener {
       this.plugin.app.vault.on("delete", (file) => {
         if (!this.store.settings.autoSync) return;
         if (!isPathInsideFolder(file.path, this.store.settings.watchFolder)) return;
-        this.cancel(file.path);
+        if (file instanceof TFile) this.cancel(file);
         void this.syncService
           .deleteByPath(file.path)
           .then((result) => {
@@ -41,13 +41,11 @@ export class VaultListener {
     this.plugin.registerEvent(
       this.plugin.app.vault.on("rename", (file, oldPath) => {
         if (!this.store.settings.autoSync) return;
-        this.cancel(oldPath);
-        this.cancel(file.path);
-        if (!(file instanceof TFile) || file.extension.toLowerCase() !== "md") {
-          void this.syncService.deleteByPath(oldPath).catch((error) => this.onError(`Failed to handle rename of ${file.name}`, error));
-          return;
+        if (file instanceof TFolder) {
+          this.handleFolderRename(file, oldPath);
+        } else if (file instanceof TFile) {
+          this.handleFileRename(file, oldPath);
         }
-        this.schedule(file, oldPath);
       })
     );
   }
@@ -66,17 +64,36 @@ export class VaultListener {
     this.schedule(file);
   }
 
-  private schedule(file: TFile, oldPath?: string): void {
-    const key = oldPath ?? file.path;
-    this.cancel(key);
-    if (key !== file.path) this.cancel(file.path);
+  private handleFolderRename(folder: TFolder, oldPath: string): void {
+    for (const child of folder.children) {
+      const previousPath = `${oldPath}/${child.name}`;
+      if (child instanceof TFolder) {
+        this.handleFolderRename(child, previousPath);
+      } else if (child instanceof TFile && child.extension.toLowerCase() === "md") {
+        this.handleFileRename(child, previousPath);
+      }
+    }
+  }
+
+  private handleFileRename(file: TFile, oldPath: string): void {
+    this.cancel(file);
+    // Enqueue the move now: a debounced rename would let manual/automatic edits
+    // upload the new path before its old sync record has been moved.
+    void this.syncService.handleRename(file, oldPath)
+      .then((result) => {
+        if (result.status === "deleted") this.onSuccess(`Removed ${file.name} from AnythingLLM`);
+        else if (result.status === "synced") this.onSuccess(`Updated ${file.name}`);
+      })
+      .catch((error) => this.onError(`Failed to handle rename of ${file.name}`, error));
+  }
+
+  private schedule(file: TFile): void {
+    this.cancel(file);
 
     const delay = Math.max(0, Math.min(this.store.settings.syncDelayMs, 30_000));
     const timer = window.setTimeout(() => {
-      this.timers.delete(key);
-      const task = oldPath
-        ? this.syncService.handleRename(file, oldPath)
-        : this.syncService.syncFile(file, "auto");
+      this.timers.delete(file);
+      const task = this.syncService.syncFile(file, "auto");
 
       void task
         .then((result) => {
@@ -88,12 +105,12 @@ export class VaultListener {
         .catch((error) => this.onError(`Failed to sync ${file.name}`, error));
     }, delay);
 
-    this.timers.set(key, timer);
+    this.timers.set(file, timer);
   }
 
-  private cancel(path: string): void {
-    const timer = this.timers.get(path);
+  private cancel(file: TFile): void {
+    const timer = this.timers.get(file);
     if (timer !== undefined) window.clearTimeout(timer);
-    this.timers.delete(path);
+    this.timers.delete(file);
   }
 }

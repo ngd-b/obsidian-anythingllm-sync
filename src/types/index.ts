@@ -21,6 +21,7 @@ export interface SyncRecord {
   remoteName?: string;
   workspaceSlug: string;
   lastSyncedAt: number;
+  pendingRename?: boolean;
 }
 
 export interface PersistedPluginData {
