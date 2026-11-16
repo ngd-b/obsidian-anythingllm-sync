@@ -1,6 +1,6 @@
 # AnythingLLM Sync for Obsidian
 
-Automatically keep Markdown notes in an Obsidian folder synchronized with an AnythingLLM workspace.
+Automatically keep Markdown notes in selected Obsidian folders synchronized with an AnythingLLM workspace.
 
 A typical personal knowledge flow becomes:
 
@@ -16,7 +16,8 @@ AI answers from your notes
 
 ## Features
 
-- Choose any vault-relative watch folder.
+- Select multiple watch folders from a folder-tree dialog with checkboxes.
+- Include subfolders automatically and avoid duplicate syncs for overlapping selections.
 - Choose an AnythingLLM workspace by name.
 - Automatic sync on Markdown create and edit.
 - Automatic removal from Workspace retrieval when a note is deleted.
@@ -47,6 +48,7 @@ Required files:
 ```text
 main.js
 manifest.json
+styles.css
 ```
 
 Then enable **AnythingLLM Sync** in Obsidian → Settings → Community plugins.
@@ -59,13 +61,15 @@ Then enable **AnythingLLM Sync** in Obsidian → Settings → Community plugins.
 4. Create/select the API key through Obsidian SecretStorage.
 5. Test the connection.
 6. Refresh workspaces and select the target workspace.
-7. Set a vault-relative watch folder such as `00-Inbox`.
+7. Click **Choose folders**, check folders such as `00-Inbox` and `Knowledge`, then click **Confirm**. Selecting a parent includes its subfolders. Canceling leaves your settings unchanged.
 8. Enable automatic sync.
+
+Use **Sync watched folders now** to upload existing notes. With no folders selected, automatic folder sync is disabled. Removing a folder from the selection keeps its existing AnythingLLM documents and stops automatically tracking changes in that folder. Existing single-folder settings are migrated automatically.
 
 ## Commands
 
 - **AnythingLLM Sync: Sync current note to AnythingLLM**
-- **AnythingLLM Sync: Sync watched folder to AnythingLLM**
+- **AnythingLLM Sync: Sync watched folders to AnythingLLM**
 
 ## Sync behavior
 
@@ -74,6 +78,8 @@ Then enable **AnythingLLM Sync** in Obsidian → Settings → Community plugins.
 | Create Markdown | Upload + embed |
 | Edit Markdown | Replace Workspace embedding with latest content |
 | Rename Markdown | Re-upload under new filename + replace old embedding |
+| Move between watched folders | Update the path mapping and replace the old embedding |
+| Move out of all watched folders | Remove the old embedding from the Workspace |
 | Delete Markdown | Remove old embedding from Workspace |
 | Existing notes | Use bulk sync command |
 
@@ -102,7 +108,7 @@ Obsidian expects the GitHub release tag to exactly match `manifest.json` (for ex
 
 - `main.js`
 - `manifest.json`
-- `styles.css` only if a future version adds custom CSS
+- `styles.css`
 
 The included GitHub Actions workflow builds and publishes those assets when a semantic-version tag is pushed.
 

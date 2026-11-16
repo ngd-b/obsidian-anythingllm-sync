@@ -1,7 +1,7 @@
 import { TFile, TFolder, type App } from "obsidian";
 import type { DeleteResult, SyncOrigin, SyncRecord, SyncResult } from "../types";
 import { hashContent } from "../utils/hash";
-import { cleanVaultFolder, isPathInsideFolder } from "../utils/path";
+import { isPathInsideWatchFolders, normalizeWatchFolders } from "../utils/path";
 import { AnythingLLMClient } from "./anythingllm-client";
 import { PluginStore } from "../store/plugin-store";
 
@@ -50,13 +50,14 @@ export class SyncService {
   }
 
   async syncWatchedFolder(): Promise<{ synced: number; skipped: number; failed: number }> {
-    const watchFolder = cleanVaultFolder(this.store.settings.watchFolder);
-    if (!watchFolder) return { synced: 0, skipped: 0, failed: 0 };
-
-    const folder = this.app.vault.getFolderByPath(watchFolder);
-    if (!folder) return { synced: 0, skipped: 0, failed: 0 };
-
-    const files = collectMarkdownFiles(folder);
+    const watchFolders = normalizeWatchFolders(this.store.settings.watchFolders);
+    const filesByPath = new Map<string, TFile>();
+    for (const path of watchFolders) {
+      const folder = this.app.vault.getFolderByPath(path);
+      if (!folder) throw new Error(`Watch folder does not exist: ${path}`);
+      for (const file of collectMarkdownFiles(folder)) filesByPath.set(file.path, file);
+    }
+    const files = [...filesByPath.values()];
 
     let synced = 0;
     let skipped = 0;
@@ -86,7 +87,7 @@ export class SyncService {
     if (extension.toLowerCase() !== "md") {
       return { status: "ignored", reason: "unsupported-file" };
     }
-    if (origin === "auto" && !isPathInsideFolder(path, this.store.settings.watchFolder)) {
+    if (origin === "auto" && !isPathInsideWatchFolders(path, this.store.settings.watchFolders)) {
       return { status: "ignored", reason: "outside-watch-folder" };
     }
 
@@ -188,9 +189,9 @@ export class SyncService {
     extension: string
   ): Promise<SyncResult | DeleteResult> {
     const isMarkdown = extension.toLowerCase() === "md";
-    const oldInside = isPathInsideFolder(oldPath, this.store.settings.watchFolder);
-    const newInside = isPathInsideFolder(path, this.store.settings.watchFolder);
-    if (isMarkdown && !oldInside && !newInside) {
+    const oldInside = isPathInsideWatchFolders(oldPath, this.store.settings.watchFolders);
+    const newInside = isPathInsideWatchFolders(path, this.store.settings.watchFolders);
+    if (!oldInside && !newInside) {
       return { status: "ignored", reason: "outside-watch-folder" };
     }
 

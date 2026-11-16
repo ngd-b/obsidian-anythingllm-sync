@@ -27,7 +27,7 @@ function load(entry, window = {}) {
     entryPoints: [entry], bundle: true, platform: "node", format: "cjs",
     external: ["obsidian"], write: false
   }).outputFiles[0].text;
-  const context = { module: { exports: {} }, require: () => obsidian, window, console };
+  const context = { module: { exports: {} }, require: () => obsidian, window, console, structuredClone };
   vm.runInNewContext(code, context);
   return context.module.exports;
 }
@@ -50,7 +50,7 @@ function setup() {
   let timerId = 0;
   let content = "note content";
   const store = {
-    settings: { baseUrl: "http://localhost:3001", workspaceSlug: "wiki", watchFolder: "Inbox", autoSync: true, syncDelayMs: 1000 },
+    settings: { baseUrl: "http://localhost:3001", workspaceSlug: "wiki", watchFolders: ["Inbox"], autoSync: true, syncDelayMs: 1000 },
     apiKey: "test-key",
     getSyncRecord: (path) => records.get(path),
     setSyncRecord: async (record) => { records.set(record.localPath, record); },
@@ -70,7 +70,9 @@ function setup() {
       for (const location of adds) active.add(location);
     }
   };
+  const folders = new Map();
   const app = { vault: {
+    getFolderByPath: (path) => folders.get(path) ?? null,
     read: async () => content,
     on: (event, handler) => { handlers[event] = handler; }
   } };
@@ -90,7 +92,7 @@ function setup() {
     () => {}, (message, error) => errors.push({ message, error }));
   listener.register();
   return {
-    records, active, uploads, handlers, errors, timers, store, client, app, service, listener, renames,
+    records, active, uploads, handlers, errors, timers, store, client, app, service, listener, renames, folders,
     setContent: (value) => { content = value; }
   };
 }
@@ -203,7 +205,7 @@ test("moving a folder into the watched directory syncs nested Markdown only", as
 
 test("moving an ancestor folder also handles children crossing the watch boundary", async () => {
   const s = setup();
-  s.store.settings.watchFolder = "Parent/Inbox";
+  s.store.settings.watchFolders = ["Parent/Inbox"];
   const file = new TFile("Parent/Inbox/a.md");
   await s.service.syncFile(file, "manual");
   file.move("Renamed/Inbox/a.md");
@@ -302,4 +304,113 @@ test("restoring unchanged content after an empty rename updates the remote filen
   await s.service.syncFile(file, "auto");
   assertSingleDocument(s, file.path);
   assert.equal(s.uploads.at(-1).filename, "b.md");
+});
+
+test("automatic events watch multiple roots and ignore paths outside them", async () => {
+  const s = setup();
+  s.store.settings.watchFolders = ["Inbox", "Knowledge"];
+  s.handlers.modify(new TFile("Inbox/a.md"));
+  s.handlers.create(new TFile("Knowledge/Sub/b.md"));
+  s.handlers.modify(new TFile("Knowledge-other/c.md"));
+  assert.equal(s.timers.size, 2);
+  const ignored = await s.service.syncFile(new TFile("Private/note.md"), "auto");
+  assert.equal(ignored.status, "ignored");
+});
+
+test("moving between two watched folders replaces rather than deletes the document", async () => {
+  const s = setup();
+  s.store.settings.watchFolders = ["Inbox", "Knowledge"];
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "auto");
+  file.move("Knowledge/a.md");
+  s.handlers.rename(new TFolder("Knowledge", [file]), "Inbox");
+  await Promise.all(s.renames);
+  assertSingleDocument(s, file.path);
+});
+
+test("bulk sync includes multiple roots and processes overlapping subfolders once", async () => {
+  const s = setup();
+  const nested = new TFolder("Inbox/Sub", [new TFile("Inbox/Sub/a.md")]);
+  s.folders.set("Inbox", new TFolder("Inbox", [nested, new TFile("Inbox/b.md")]));
+  s.folders.set("Inbox/Sub", nested);
+  s.folders.set("Knowledge", new TFolder("Knowledge", [new TFile("Knowledge/c.md")]));
+  s.store.settings.watchFolders = ["Inbox/Sub", "Knowledge", "Inbox", "Inbox"];
+  const result = await s.service.syncWatchedFolder();
+  assert.equal(result.synced, 3);
+  assert.equal(result.skipped, 0);
+  assert.equal(s.uploads.length, 3);
+});
+
+test("a missing watched folder reports an error instead of false bulk success", async () => {
+  const s = setup();
+  await assert.rejects(s.service.syncWatchedFolder(), /Watch folder does not exist: Inbox/);
+});
+
+test("removing a configured folder preserves its remote documents and stops tracking events", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "auto");
+  s.store.settings.watchFolders = [];
+  s.handlers.modify(file);
+  s.handlers.delete(file);
+  assert.equal(s.timers.size, 0);
+  assertSingleDocument(s, file.path);
+});
+
+test("renaming an unselected note to another extension preserves its existing remote document", async () => {
+  const s = setup();
+  const file = new TFile("Inbox/a.md");
+  await s.service.syncFile(file, "auto");
+  s.store.settings.watchFolders = ["Knowledge"];
+  file.move("Inbox/a.txt");
+  s.handlers.rename(file, "Inbox/a.md");
+  await Promise.all(s.renames);
+  assertSingleDocument(s, "Inbox/a.md");
+  assert.equal(s.uploads.length, 1);
+});
+
+const { PluginStore } = load("src/store/plugin-store.ts");
+
+function persistedStore(data, fail = false) {
+  let saved;
+  const store = new PluginStore({
+    loadData: async () => data,
+    saveData: async (value) => {
+      if (fail) throw new Error("disk full");
+      saved = structuredClone(value);
+    },
+    app: { secretStorage: { getSecret: () => "", setSecret: () => {} } }
+  });
+  return { store, saved: () => saved, fail: (value) => { fail = value; } };
+}
+
+test("legacy nested and flat folder settings migrate without retaining watchFolder", async () => {
+  for (const raw of [{ settings: { watchFolder: " /Inbox/ " } }, { watchFolder: "Inbox" }]) {
+    const s = persistedStore(raw);
+    await s.store.load();
+    assert.deepEqual(Array.from(s.store.settings.watchFolders), ["Inbox"]);
+    assert.equal(s.saved().settings.watchFolder, undefined);
+  }
+});
+
+test("an explicit empty multi-folder selection overrides a legacy folder", async () => {
+  const s = persistedStore({ settings: { watchFolders: [], watchFolder: "Inbox" } });
+  await s.store.load();
+  assert.equal(s.store.settings.watchFolders.length, 0);
+});
+
+test("saving folder choices normalizes overlaps and persists the result", async () => {
+  const s = persistedStore(null);
+  await s.store.load();
+  await s.store.updateSettings({ watchFolders: ["Inbox/Sub", "Inbox", "/Knowledge/", "Inbox"] });
+  assert.deepEqual(Array.from(s.store.settings.watchFolders), ["Inbox", "Knowledge"]);
+  assert.deepEqual(s.saved().settings.watchFolders, ["Inbox", "Knowledge"]);
+});
+
+test("failed settings save restores the previous folders", async () => {
+  const s = persistedStore({ settings: { watchFolders: ["Inbox"] } });
+  await s.store.load();
+  s.fail(true);
+  await assert.rejects(s.store.updateSettings({ watchFolders: ["Knowledge"] }), /disk full/);
+  assert.deepEqual(Array.from(s.store.settings.watchFolders), ["Inbox"]);
 });

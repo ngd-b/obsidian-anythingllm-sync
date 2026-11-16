@@ -54,8 +54,8 @@ export default class AnythingLLMSyncPlugin extends Plugin {
   }
 
   async syncWatchedFolderWithNotice(): Promise<{ synced: number; skipped: number; failed: number }> {
-    if (!this.store.settings.watchFolder.trim()) {
-      new Notice("AnythingLLM Sync: watch folder is not configured.");
+    if (!this.store.settings.watchFolders.length) {
+      new Notice("AnythingLLM Sync: no watch folders are selected.");
       return { synced: 0, skipped: 0, failed: 0 };
     }
     return this.syncService.syncWatchedFolder();
@@ -75,7 +75,7 @@ export default class AnythingLLMSyncPlugin extends Plugin {
 
     this.addCommand({
       id: "sync-watched-folder",
-      name: "Sync watched folder to AnythingLLM",
+      name: "Sync watched folders to AnythingLLM",
       callback: () => void this.runBulkSync()
     });
   }

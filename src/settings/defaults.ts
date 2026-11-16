@@ -7,7 +7,7 @@ export const DEFAULT_SETTINGS: AnythingLLMSyncSettings = {
   apiKeySecretId: DEFAULT_SECRET_ID,
   workspaceSlug: "",
   workspaceName: "",
-  watchFolder: "",
+  watchFolders: [],
   autoSync: true,
   syncDelayMs: 1000,
   showNotices: true

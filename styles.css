@@ -1,0 +1,31 @@
+.anythingllm-folder-tree {
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.anythingllm-folder-node > summary,
+.anythingllm-folder-leaf {
+  min-height: 32px;
+  padding: var(--size-4-1);
+  overflow-wrap: anywhere;
+}
+
+.anythingllm-folder-node > summary {
+  cursor: pointer;
+}
+
+.anythingllm-folder-leaf {
+  padding-inline-start: 22px;
+}
+
+.anythingllm-folder-tree input[type="checkbox"] {
+  float: right;
+  margin-inline-start: var(--size-4-2);
+}
+
+.anythingllm-folder-children {
+  margin-inline-start: var(--size-4-4);
+}

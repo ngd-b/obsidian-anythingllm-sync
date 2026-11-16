@@ -8,7 +8,7 @@ export interface AnythingLLMSyncSettings {
   apiKeySecretId: string;
   workspaceSlug: string;
   workspaceName: string;
-  watchFolder: string;
+  watchFolders: string[];
   autoSync: boolean;
   syncDelayMs: number;
   showNotices: boolean;

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Select multiple watch folders in a modal folder tree with checkboxes and explicit confirmation; migrate existing single-folder settings automatically.
+- Deduplicate overlapping folder selections and preserve sync mappings when moving notes between watched folders.
 - Serialize renames with edits, manual syncs and deletes across both old and new paths to prevent duplicate Workspace documents.
 - Handle folder renames and moves recursively, updating or removing synchronized Markdown descendants as they cross the watch-folder boundary.
 

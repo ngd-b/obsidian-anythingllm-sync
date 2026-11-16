@@ -2,7 +2,7 @@ import type { Plugin, TAbstractFile } from "obsidian";
 import { TFile, TFolder } from "obsidian";
 import { SyncService } from "../services/sync-service";
 import { PluginStore } from "../store/plugin-store";
-import { isPathInsideFolder } from "../utils/path";
+import { isPathInsideWatchFolders } from "../utils/path";
 
 export class VaultListener {
   private readonly timers = new Map<TFile, number>();
@@ -27,7 +27,7 @@ export class VaultListener {
     this.plugin.registerEvent(
       this.plugin.app.vault.on("delete", (file) => {
         if (!this.store.settings.autoSync) return;
-        if (!isPathInsideFolder(file.path, this.store.settings.watchFolder)) return;
+        if (!isPathInsideWatchFolders(file.path, this.store.settings.watchFolders)) return;
         if (file instanceof TFile) this.cancel(file);
         void this.syncService
           .deleteByPath(file.path)
@@ -60,7 +60,7 @@ export class VaultListener {
     if (!settings.autoSync) return;
     if (!(file instanceof TFile)) return;
     if (file.extension.toLowerCase() !== "md") return;
-    if (!isPathInsideFolder(file.path, settings.watchFolder)) return;
+    if (!isPathInsideWatchFolders(file.path, settings.watchFolders)) return;
     this.schedule(file);
   }
 

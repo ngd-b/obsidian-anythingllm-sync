@@ -9,6 +9,7 @@ import {
 import type AnythingLLMSyncPlugin from "../main";
 import type { AnythingLLMSyncSettings } from "../types";
 import { DEFAULT_SECRET_ID } from "./defaults";
+import { FolderPickerModal } from "./folder-picker-modal";
 
 export class AnythingLLMSyncSettingTab extends PluginSettingTab {
   constructor(app: App, private readonly syncPlugin: AnythingLLMSyncPlugin) {
@@ -53,17 +54,12 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
         render: (setting) => this.renderWorkspace(setting)
       },
       {
-        name: "Watch folder",
-        desc: "Vault-relative folder to auto-sync. Subfolders are included. Leave blank to disable automatic folder sync.",
-        control: {
-          type: "text",
-          key: "watchFolder",
-          placeholder: "00-Inbox"
-        }
+        name: "Watch folders",
+        render: (setting) => this.renderWatchFolders(setting)
       },
       {
         name: "Automatic sync",
-        desc: "Sync created, edited, renamed and deleted Markdown notes inside the watch folder.",
+        desc: "Sync created, edited, renamed and deleted Markdown notes inside any selected folder.",
         control: { type: "toggle", key: "autoSync" }
       },
       {
@@ -89,8 +85,8 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
         heading: "Maintenance",
         items: [
           {
-            name: "Sync watched folder now",
-            desc: "Upload or update all Markdown notes currently inside the watch folder.",
+            name: "Sync watched folders now",
+            desc: "Upload or update Markdown notes in all selected folders. Overlapping folders are synced once.",
             action: async (el) => {
               const button = findButton(el);
               if (button) button.disabled = true;
@@ -100,6 +96,8 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
                   `AnythingLLM Sync: ${result.synced} synced, ${result.skipped} skipped, ${result.failed} failed.`,
                   7000
                 );
+              } catch (error) {
+                new Notice(`AnythingLLM Sync failed: ${errorMessage(error)}`, 7000);
               } finally {
                 if (button) button.disabled = false;
               }
@@ -148,6 +146,23 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
           });
         })
     );
+  }
+
+  private renderWatchFolders(setting: Setting): void {
+    const updateSummary = () => {
+      const folders = this.syncPlugin.store.settings.watchFolders;
+      const preview = folders.slice(0, 3).join(", ");
+      setting.setDesc(folders.length
+        ? `${folders.length} folder(s): ${preview}${folders.length > 3 ? ", …" : ""}. Subfolders are included.`
+        : "No folders selected. Automatic folder sync is disabled.");
+    };
+    updateSummary();
+    setting.addButton((button) => button.setButtonText("Choose folders").onClick(() => {
+      new FolderPickerModal(this.app, this.syncPlugin.store.settings.watchFolders, async (watchFolders) => {
+        await this.syncPlugin.store.updateSettings({ watchFolders });
+        updateSummary();
+      }).open();
+    }));
   }
 
   private renderWorkspace(setting: Setting): void {

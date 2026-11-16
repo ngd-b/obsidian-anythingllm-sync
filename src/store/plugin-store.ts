@@ -1,9 +1,12 @@
 import type { Plugin } from "obsidian";
 import { DEFAULT_DATA, DEFAULT_SECRET_ID, DEFAULT_SETTINGS } from "../settings/defaults";
 import type { AnythingLLMSyncSettings, PersistedPluginData, SyncRecord } from "../types";
+import { normalizeWatchFolders } from "../utils/path";
+
+type LegacySettings = Partial<AnythingLLMSyncSettings> & { apiKey?: string; watchFolder?: string };
 
 interface LegacyData {
-  settings?: Partial<AnythingLLMSyncSettings> & { apiKey?: string };
+  settings?: LegacySettings;
   syncRecords?: Record<string, SyncRecord>;
   apiKey?: string;
   [key: string]: unknown;
@@ -23,14 +26,19 @@ export class PluginStore {
     }
 
     const nestedSettings = raw.settings;
-    const legacyFlat = !nestedSettings ? (raw as Partial<AnythingLLMSyncSettings> & { apiKey?: string }) : undefined;
+    const legacyFlat = !nestedSettings ? (raw as LegacySettings) : undefined;
     const sourceSettings = nestedSettings ?? legacyFlat ?? {};
     const legacyApiKey = nestedSettings?.apiKey ?? legacyFlat?.apiKey ?? raw.apiKey;
-    const { apiKey: _legacyApiKey, ...safeSourceSettings } = sourceSettings;
+    const { apiKey: _legacyApiKey, watchFolder: legacyWatchFolder, ...safeSourceSettings } = sourceSettings;
 
     const settings: AnythingLLMSyncSettings = {
       ...DEFAULT_SETTINGS,
       ...safeSourceSettings,
+      watchFolders: normalizeWatchFolders(
+        Array.isArray(safeSourceSettings.watchFolders)
+          ? safeSourceSettings.watchFolders
+          : typeof legacyWatchFolder === "string" ? [legacyWatchFolder] : []
+      ),
       apiKeySecretId: safeSourceSettings.apiKeySecretId || DEFAULT_SECRET_ID
     };
 
@@ -63,8 +71,19 @@ export class PluginStore {
   }
 
   async updateSettings(patch: Partial<AnythingLLMSyncSettings>): Promise<void> {
-    this.data.settings = { ...this.data.settings, ...patch };
-    await this.persist();
+    const previous = this.data.settings;
+    const next = {
+      ...previous,
+      ...patch,
+      watchFolders: patch.watchFolders ? normalizeWatchFolders(patch.watchFolders) : previous.watchFolders
+    };
+    this.data.settings = next;
+    try {
+      await this.persist();
+    } catch (error) {
+      if (this.data.settings === next) this.data.settings = previous;
+      throw error;
+    }
   }
 
   async setSyncRecord(record: SyncRecord): Promise<void> {
