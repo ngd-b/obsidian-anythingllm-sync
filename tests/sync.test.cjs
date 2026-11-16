@@ -346,6 +346,53 @@ test("a missing watched folder reports an error instead of false bulk success", 
   await assert.rejects(s.service.syncWatchedFolder(), /Watch folder does not exist: Inbox/);
 });
 
+test("one-time folder sync recursively includes Markdown outside the watch scope", async () => {
+  const s = setup();
+  s.store.settings.watchFolders = [];
+  s.store.settings.autoSync = false;
+  const folder = new TFolder("Archive", [
+    new TFile("Archive/a.md"),
+    new TFile("Archive/image.png"),
+    new TFolder("Archive/Sub", [new TFile("Archive/Sub/b.MD")])
+  ]);
+  const result = await s.service.syncFolder(folder);
+  assert.equal(result.synced, 2);
+  assert.equal(result.failed, 0);
+  assert.equal(s.uploads.length, 2);
+  assert.equal(s.store.settings.watchFolders.length, 0);
+  assert.equal(s.store.settings.autoSync, false);
+  assert.deepEqual([...s.records.keys()].sort(), ["Archive/Sub/b.MD", "Archive/a.md"]);
+  const repeated = await s.service.syncFolder(folder);
+  assert.equal(repeated.synced, 0);
+  assert.equal(repeated.skipped, 2);
+  assert.equal(s.active.size, 2);
+});
+
+test("one-time folder sync skips empty notes and continues after a file fails", async () => {
+  const s = setup();
+  s.app.vault.read = async (file) => {
+    if (file.name === "bad.md") throw new Error("unreadable file");
+    return file.name === "empty.md" ? "" : "note content";
+  };
+  const folder = new TFolder("Archive", [
+    new TFile("Archive/bad.md"), new TFile("Archive/empty.md"), new TFile("Archive/good.md")
+  ]);
+  const result = await s.service.syncFolder(folder);
+  assert.equal(result.synced, 1);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.failed, 1);
+  assertSingleDocument(s, "Archive/good.md");
+});
+
+test("one-time sync of a folder without Markdown completes without uploads", async () => {
+  const s = setup();
+  const result = await s.service.syncFolder(new TFolder("Archive", [new TFile("Archive/image.png")]));
+  assert.equal(result.synced, 0);
+  assert.equal(result.skipped, 0);
+  assert.equal(result.failed, 0);
+  assert.equal(s.uploads.length, 0);
+});
+
 test("removing a configured folder preserves its remote documents and stops tracking events", async () => {
   const s = setup();
   const file = new TFile("Inbox/a.md");

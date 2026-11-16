@@ -57,8 +57,15 @@ export class SyncService {
       if (!folder) throw new Error(`Watch folder does not exist: ${path}`);
       for (const file of collectMarkdownFiles(folder)) filesByPath.set(file.path, file);
     }
-    const files = [...filesByPath.values()];
+    return this.syncFiles([...filesByPath.values()]);
+  }
 
+  /** One-time recursive sync; does not change the automatic watch scope. */
+  syncFolder(folder: TFolder): Promise<{ synced: number; skipped: number; failed: number }> {
+    return this.syncFiles(collectMarkdownFiles(folder));
+  }
+
+  private async syncFiles(files: TFile[]): Promise<{ synced: number; skipped: number; failed: number }> {
     let synced = 0;
     let skipped = 0;
     let failed = 0;

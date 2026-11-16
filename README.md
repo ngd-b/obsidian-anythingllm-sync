@@ -26,6 +26,7 @@ AI answers from your notes
 - Content hashing to skip unchanged notes.
 - Bulk sync existing Markdown files.
 - Manual sync command for the active note.
+- Right-click a Markdown file to sync it, or a folder to recursively sync its Markdown notes.
 - Secure Developer API key storage using Obsidian SecretStorage.
 - Per-vault settings and sync state.
 
@@ -70,6 +71,8 @@ Use **Sync watched folders now** to upload existing notes. With no folders selec
 
 - **AnythingLLM Sync: Sync current note to AnythingLLM**
 - **AnythingLLM Sync: Sync watched folders to AnythingLLM**
+
+In the file explorer, right-click a Markdown file and choose **Sync file to AnythingLLM**, or right-click a folder and choose **Sync folder to AnythingLLM**. Folder sync includes subfolders, skips unsupported files, and reports synced, skipped and failed counts. These are one-time actions that also work outside watched folders and with automatic sync disabled; they do not change your watch-folder selection.
 
 ## Sync behavior
 

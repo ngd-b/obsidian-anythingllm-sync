@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile } from "obsidian";
+import { Notice, Plugin, TFile, TFolder } from "obsidian";
 import { VaultListener } from "./listeners/vault-listener";
 import { AnythingLLMSyncSettingTab } from "./settings/settings-tab";
 import { AnythingLLMClient } from "./services/anythingllm-client";
@@ -22,6 +22,7 @@ export default class AnythingLLMSyncPlugin extends Plugin {
 
     this.addSettingTab(new AnythingLLMSyncSettingTab(this.app, this));
     this.registerCommands();
+    this.registerContextMenu();
 
     this.app.workspace.onLayoutReady(() => {
       this.vaultListener = new VaultListener(
@@ -80,6 +81,22 @@ export default class AnythingLLMSyncPlugin extends Plugin {
     });
   }
 
+  private registerContextMenu(): void {
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (file instanceof TFolder) {
+        menu.addItem((item) => item
+          .setTitle("Sync folder to AnythingLLM")
+          .setIcon("refresh-cw")
+          .onClick(() => this.runBulkSync(file)));
+      } else if (file instanceof TFile && file.extension.toLowerCase() === "md") {
+        menu.addItem((item) => item
+          .setTitle("Sync file to AnythingLLM")
+          .setIcon("refresh-cw")
+          .onClick(() => this.runManualSync(file)));
+      }
+    }));
+  }
+
   private async runManualSync(file: TFile): Promise<void> {
     try {
       const result = await this.syncService.syncFile(file, "manual");
@@ -97,13 +114,18 @@ export default class AnythingLLMSyncPlugin extends Plugin {
     }
   }
 
-  private async runBulkSync(): Promise<void> {
+  private async runBulkSync(folder?: TFolder): Promise<void> {
+    const progress = new Notice(`AnythingLLM Sync: syncing ${folder ? folder.path || "vault" : "watched folders"}…`, 0);
     try {
-      const result = await this.syncWatchedFolderWithNotice();
+      const result = folder
+        ? await this.syncService.syncFolder(folder)
+        : await this.syncWatchedFolderWithNotice();
       new Notice(`AnythingLLM Sync: ${result.synced} synced, ${result.skipped} skipped, ${result.failed} failed.`, 8000);
     } catch (error) {
       console.error("[AnythingLLM Sync] Bulk sync failed", error);
       new Notice(`AnythingLLM Sync failed: ${errorMessage(error)}`, 8000);
+    } finally {
+      progress.hide();
     }
   }
 }

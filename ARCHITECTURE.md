@@ -41,6 +41,8 @@ The watched scope is the union of `settings.watchFolders`. Parent selections inc
 
 The folder picker edits a draft selection in a modal and saves only on confirmation. Descendant checkboxes covered by a selected parent are checked and disabled. Saving failures stay in the modal and restore the prior in-memory settings; the settings page updates only its folder summary, preserving the page position.
 
+File explorer context menus use Obsidian's registered `file-menu` event. Markdown file actions reuse manual sync; folder actions recursively collect Markdown notes and reuse the bulk sync loop. These actions operate on the clicked file or folder independently of the active note and automatic watch scope, without changing settings. Folder operations show an in-progress notice and final synced/skipped/failed counts.
+
 AnythingLLM's documented public API exposes workspace embedding management, but not a documented endpoint for permanently deleting each superseded source object from global document storage. Therefore this plugin guarantees Workspace retrieval synchronization; stale source objects can remain in AnythingLLM's global document storage after updates.
 
 ## Security

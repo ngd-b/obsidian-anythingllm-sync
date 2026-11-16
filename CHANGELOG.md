@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add right-click actions to sync a Markdown file or recursively sync a folder, including folders outside the automatic watch scope.
 - Select multiple watch folders in a modal folder tree with checkboxes and explicit confirmation; migrate existing single-folder settings automatically.
 - Deduplicate overlapping folder selections and preserve sync mappings when moving notes between watched folders.
 - Serialize renames with edits, manual syncs and deletes across both old and new paths to prevent duplicate Workspace documents.
