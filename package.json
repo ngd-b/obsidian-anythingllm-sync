@@ -1,7 +1,7 @@
 {
   "name": "obsidian-anythingllm-sync",
-  "version": "1.0.3",
-  "description": "Automatically sync Markdown notes from Obsidian to an AnythingLLM workspace.",
+  "version": "1.1.0",
+  "description": "Sync Markdown notes from selected Obsidian folders to an AnythingLLM workspace.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

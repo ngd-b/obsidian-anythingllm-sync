@@ -33,7 +33,7 @@ AI answers from your notes
 
 ## Requirements
 
-- Obsidian 1.11.4 or newer.
+- Obsidian 1.13.0 or newer.
 - An AnythingLLM instance reachable from the device running Obsidian.
 - An AnythingLLM Developer API key.
 

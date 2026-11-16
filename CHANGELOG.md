@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 - Add file-explorer status badges and a note status dialog with remote verification and resync actions.
 - Check tracked notes or folders against remote workspace documents, persist missing-document markers, and restore missing notes on the next sync even if their content is unchanged.
