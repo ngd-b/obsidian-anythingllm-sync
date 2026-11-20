@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: AnythingLLMSyncSettings = {
   workspaceSlug: "",
   workspaceName: "",
   watchFolders: [],
+  excludedFolders: [],
   autoSync: true,
   syncDelayMs: 1000,
   showNotices: true

@@ -35,7 +35,9 @@ const code = buildSync({
 const context = {
   module: { exports: {} }, structuredClone,
   console: { error: () => {} },
-  require: () => ({ Plugin, Notice, TFile, TFolder, PluginSettingTab: class {}, Modal: class {} })
+  require: () => ({ Plugin, Notice, TFile, TFolder, PluginSettingTab: class {
+    containerEl = { addClass() {} };
+  }, Modal: class {} })
 };
 vm.runInNewContext(code, context);
 const SyncPlugin = context.module.exports.default;

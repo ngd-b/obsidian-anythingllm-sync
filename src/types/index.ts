@@ -3,12 +3,16 @@ export interface WorkspaceOption {
   slug: string;
 }
 
-export interface AnythingLLMSyncSettings {
+export interface WatchFolderSelection {
+  watchFolders: string[];
+  excludedFolders: string[];
+}
+
+export interface AnythingLLMSyncSettings extends WatchFolderSelection {
   baseUrl: string;
   apiKeySecretId: string;
   workspaceSlug: string;
   workspaceName: string;
-  watchFolders: string[];
   autoSync: boolean;
   syncDelayMs: number;
   showNotices: boolean;
@@ -66,7 +70,7 @@ export interface UploadDocumentResult {
   documents: AnythingLLMDocument[];
 }
 
-export type SyncOrigin = "auto" | "manual" | "bulk" | "rename";
+export type SyncOrigin = "auto" | "manual" | "bulk" | "watched-bulk" | "rename";
 
 export type SyncResult =
   | { status: "synced"; operation: "created" | "updated" | "migrated"; record: SyncRecord }

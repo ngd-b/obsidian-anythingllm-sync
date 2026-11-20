@@ -35,11 +35,12 @@ export class PluginStore {
     const settings: AnythingLLMSyncSettings = {
       ...DEFAULT_SETTINGS,
       ...safeSourceSettings,
-      watchFolders: normalizeWatchFolders(
-        Array.isArray(safeSourceSettings.watchFolders)
+      ...normalizeWatchFolders({
+        watchFolders: Array.isArray(safeSourceSettings.watchFolders)
           ? safeSourceSettings.watchFolders
-          : typeof legacyWatchFolder === "string" ? [legacyWatchFolder] : []
-      ),
+          : typeof legacyWatchFolder === "string" ? [legacyWatchFolder] : [],
+        excludedFolders: Array.isArray(safeSourceSettings.excludedFolders) ? safeSourceSettings.excludedFolders : []
+      }),
       apiKeySecretId: safeSourceSettings.apiKeySecretId || DEFAULT_SECRET_ID
     };
 
@@ -78,11 +79,8 @@ export class PluginStore {
 
   async updateSettings(patch: Partial<AnythingLLMSyncSettings>): Promise<void> {
     const previous = this.data.settings;
-    const next = {
-      ...previous,
-      ...patch,
-      watchFolders: patch.watchFolders ? normalizeWatchFolders(patch.watchFolders) : previous.watchFolders
-    };
+    const next = { ...previous, ...patch };
+    if (patch.watchFolders || patch.excludedFolders) Object.assign(next, normalizeWatchFolders(next));
     this.data.settings = next;
     try {
       await this.persist();

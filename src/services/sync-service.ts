@@ -6,10 +6,10 @@ import { AnythingLLMClient } from "./anythingllm-client";
 import { PluginStore } from "../store/plugin-store";
 
 /** Recursively collect Markdown files inside a folder without enumerating the whole vault. */
-function collectMarkdownFiles(folder: TFolder, out: TFile[] = []): TFile[] {
+function collectMarkdownFiles(folder: TFolder, out: TFile[] = [], excluded?: ReadonlySet<string>): TFile[] {
   for (const child of folder.children) {
     if (child instanceof TFolder) {
-      collectMarkdownFiles(child, out);
+      if (!excluded?.has(child.path)) collectMarkdownFiles(child, out, excluded);
     } else if (child instanceof TFile && child.extension.toLowerCase() === "md") {
       out.push(child);
     }
@@ -166,29 +166,30 @@ export class SyncService {
   }
 
   async syncWatchedFolder(): Promise<{ synced: number; skipped: number; failed: number }> {
-    const watchFolders = normalizeWatchFolders(this.store.settings.watchFolders);
-    const filesByPath = new Map<string, TFile>();
+    const { watchFolders, excludedFolders } = normalizeWatchFolders(this.store.settings);
+    const excluded = new Set(excludedFolders);
+    const files: TFile[] = [];
     for (const path of watchFolders) {
       const folder = this.app.vault.getFolderByPath(path);
       if (!folder) throw new Error(`Watch folder does not exist: ${path}`);
-      for (const file of collectMarkdownFiles(folder)) filesByPath.set(file.path, file);
+      collectMarkdownFiles(folder, files, excluded);
     }
-    return this.syncFiles([...filesByPath.values()]);
+    return this.syncFiles(files, "watched-bulk");
   }
 
   /** One-time recursive sync; does not change the automatic watch scope. */
   syncFolder(folder: TFolder): Promise<{ synced: number; skipped: number; failed: number }> {
-    return this.syncFiles(collectMarkdownFiles(folder));
+    return this.syncFiles(collectMarkdownFiles(folder), "bulk");
   }
 
-  private async syncFiles(files: TFile[]): Promise<{ synced: number; skipped: number; failed: number }> {
+  private async syncFiles(files: TFile[], origin: "watched-bulk" | "bulk"): Promise<{ synced: number; skipped: number; failed: number }> {
     let synced = 0;
     let skipped = 0;
     let failed = 0;
 
     for (const file of files) {
       try {
-        const result = await this.syncFile(file, "bulk");
+        const result = await this.syncFile(file, origin);
         if (result.status === "synced") synced += 1;
         else skipped += 1;
       } catch (error) {
@@ -210,13 +211,18 @@ export class SyncService {
     if (extension.toLowerCase() !== "md") {
       return { status: "ignored", reason: "unsupported-file" };
     }
-    if (origin === "auto" && !isPathInsideWatchFolders(path, this.store.settings.watchFolders)) {
+    const usesWatchScope = origin === "auto" || origin === "watched-bulk";
+    if (usesWatchScope && !isPathInsideWatchFolders(path, this.store.settings)) {
       return { status: "ignored", reason: "outside-watch-folder" };
     }
 
     this.validateSyncSettings();
 
     const content = await this.app.vault.read(file);
+    // The file may have moved or its folder may have been excluded during the read.
+    if (usesWatchScope && !isPathInsideWatchFolders(file.path, this.store.settings)) {
+      return { status: "ignored", reason: "outside-watch-folder" };
+    }
     const oldPath = previousPath ?? path;
     const existing = this.store.getSyncRecord(oldPath) ?? this.store.getSyncRecord(path);
     if (!content.trim()) {
@@ -313,8 +319,8 @@ export class SyncService {
     extension: string
   ): Promise<SyncResult | DeleteResult> {
     const isMarkdown = extension.toLowerCase() === "md";
-    const oldInside = isPathInsideWatchFolders(oldPath, this.store.settings.watchFolders);
-    const newInside = isPathInsideWatchFolders(path, this.store.settings.watchFolders);
+    const oldInside = isPathInsideWatchFolders(oldPath, this.store.settings);
+    const newInside = isPathInsideWatchFolders(path, this.store.settings);
     if (!oldInside && !newInside) {
       return { status: "ignored", reason: "outside-watch-folder" };
     }

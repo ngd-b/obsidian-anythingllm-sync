@@ -63,7 +63,7 @@ Then enable **AnythingLLM Sync** in Obsidian → Settings → Community plugins.
 4. Create/select the API key through Obsidian SecretStorage.
 5. Test the connection.
 6. Refresh workspaces and select the target workspace.
-7. Click **Choose folders**, check folders such as `00-Inbox` and `Knowledge`, then click **Confirm**. Selecting a parent includes its subfolders. Canceling leaves your settings unchanged.
+7. Click **Choose folders**. Click **Select all** to select every current top-level folder, or check folders individually. Uncheck any folder to exclude it and its subfolders, then click **Confirm**.
 8. Enable automatic sync.
 
 Use **Sync watched folders now** to upload existing notes. With no folders selected, automatic folder sync is disabled. Removing a folder from the selection keeps its existing AnythingLLM documents and stops automatically tracking changes in that folder. Existing single-folder settings are migrated automatically.

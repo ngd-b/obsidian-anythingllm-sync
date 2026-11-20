@@ -37,9 +37,9 @@ Before reading or uploading a renamed note, its local mapping is moved to the ne
 
 Folder renames and moves recursively apply the same rules to Markdown descendants. Moving between watched folders updates child mappings; moving out of all watched folders removes child embeddings; moving into a watched folder syncs its Markdown notes.
 
-The watched scope is the union of `settings.watchFolders`. Parent selections include descendants, and overlapping selections are normalized to their parent roots. Bulk sync enumerates those roots and deduplicates notes by path. Legacy `watchFolder` settings migrate to this array on load; an explicit empty array disables automatic folder sync. Removing a configured root keeps its existing remote documents and local records.
+Folders inherit the nearest choice in `settings.watchFolders` and `settings.excludedFolders`. Bulk sync walks each included root and skips excluded branches. Legacy `watchFolder` settings migrate to this array on load; an explicit empty array disables automatic folder sync. Removing a configured root keeps its existing remote documents and local records.
 
-The folder picker edits a draft selection in a modal and saves only on confirmation. Descendant checkboxes covered by a selected parent are checked and disabled. Saving failures stay in the modal and restore the prior in-memory settings; the settings page updates only its folder summary, preserving the page position.
+The folder picker edits a draft selection in a modal and saves only on confirmation. Select all covers the current top-level folders. Each checkbox can override its inherited choice, and mixed branches display a partial check. Saving failures stay in the modal and restore the prior in-memory settings; the settings page updates only its folder summary, preserving the page position.
 
 File explorer context menus use Obsidian's registered `file-menu` event. Markdown file actions reuse manual sync; folder actions recursively collect Markdown notes and reuse the bulk sync loop. These actions operate on the clicked file or folder independently of the active note and automatic watch scope, without changing settings. Folder operations show an in-progress notice and final synced/skipped/failed counts.
 

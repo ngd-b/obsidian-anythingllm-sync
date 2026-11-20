@@ -27,7 +27,7 @@ export class VaultListener {
     this.plugin.registerEvent(
       this.plugin.app.vault.on("delete", (file) => {
         if (!this.store.settings.autoSync) return;
-        if (!isPathInsideWatchFolders(file.path, this.store.settings.watchFolders)) return;
+        if (!isPathInsideWatchFolders(file.path, this.store.settings)) return;
         if (file instanceof TFile) this.cancel(file);
         void this.syncService
           .deleteByPath(file.path)
@@ -60,7 +60,7 @@ export class VaultListener {
     if (!settings.autoSync) return;
     if (!(file instanceof TFile)) return;
     if (file.extension.toLowerCase() !== "md") return;
-    if (!isPathInsideWatchFolders(file.path, settings.watchFolders)) return;
+    if (!isPathInsideWatchFolders(file.path, settings)) return;
     this.schedule(file);
   }
 

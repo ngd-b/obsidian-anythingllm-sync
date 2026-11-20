@@ -51,7 +51,7 @@ function setup() {
   let timerId = 0;
   let content = "note content";
   const store = {
-    settings: { baseUrl: "http://localhost:3001", workspaceSlug: "wiki", watchFolders: ["Inbox"], autoSync: true, syncDelayMs: 1000 },
+    settings: { baseUrl: "http://localhost:3001", workspaceSlug: "wiki", watchFolders: ["Inbox"], excludedFolders: [], autoSync: true, syncDelayMs: 1000 },
     apiKey: "test-key",
     getSyncRecord: (path) => records.get(path),
     getAllSyncRecords: () => [...records.values()],
@@ -345,6 +345,53 @@ test("bulk sync includes multiple roots and processes overlapping subfolders onc
   assert.equal(s.uploads.length, 3);
 });
 
+test("watched sync respects nested exclusions, re-inclusions and folder boundaries", async () => {
+  const s = setup();
+  const excluded = new TFile("Inbox/Drafts/private.md");
+  const kept = new TFile("Inbox/Drafts/Shared/public.md");
+  const sibling = new TFile("Inbox/Drafts-old/sibling.md");
+  const direct = new TFile("Inbox/direct.md");
+  const shared = new TFolder("Inbox/Drafts/Shared", [kept]);
+  const drafts = new TFolder("Inbox/Drafts", [excluded, shared]);
+  s.folders.set("Inbox", new TFolder("Inbox", [direct, drafts, new TFolder("Inbox/Drafts-old", [sibling])]));
+  s.folders.set(shared.path, shared);
+  s.store.settings.watchFolders = ["Inbox", shared.path];
+  s.store.settings.excludedFolders = [drafts.path];
+
+  assert.equal((await s.service.syncWatchedFolder()).synced, 3);
+  assert.deepEqual([...s.records.keys()].sort(), [direct.path, kept.path, sibling.path].sort());
+  s.handlers.create(excluded);
+  s.handlers.modify(excluded);
+  assert.equal(s.timers.size, 0);
+  assert.equal((await s.service.syncFile(excluded, "auto")).status, "ignored");
+  await s.service.syncFile(excluded, "manual");
+  s.handlers.delete(excluded);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(s.records.has(excluded.path));
+
+  direct.move("Inbox/Drafts/direct.md");
+  assert.equal((await s.service.handleRename(direct, "Inbox/direct.md")).status, "deleted");
+  kept.move("Inbox/Drafts/Shared/new.md");
+  assert.equal((await s.service.handleRename(kept, "Inbox/Drafts/Shared/public.md")).status, "synced");
+});
+
+test("excluding a subtree during a watched batch skips both the current read and queued files", async () => {
+  const s = setup();
+  const drafts = new TFolder("Inbox/Drafts", [
+    new TFile("Inbox/Drafts/a.md"), new TFile("Inbox/Drafts/b.md")
+  ]);
+  s.folders.set("Inbox", new TFolder("Inbox", [drafts, new TFile("Inbox/keep.md")]));
+  const read = s.app.vault.read;
+  s.app.vault.read = async (file) => {
+    if (file.name === "a.md") s.store.settings.excludedFolders = [drafts.path];
+    return read(file);
+  };
+  const result = await s.service.syncWatchedFolder();
+  assert.equal(result.skipped, 2);
+  assertSingleDocument(s, "Inbox/keep.md");
+  assert.equal((await s.service.syncFolder(drafts)).synced, 2);
+});
+
 test("a missing watched folder reports an error instead of false bulk success", async () => {
   const s = setup();
   await assert.rejects(s.service.syncWatchedFolder(), /Watch folder does not exist: Inbox/);
@@ -456,6 +503,20 @@ test("saving folder choices normalizes overlaps and persists the result", async 
   await s.store.updateSettings({ watchFolders: ["Inbox/Sub", "Inbox", "/Knowledge/", "Inbox"] });
   assert.deepEqual(Array.from(s.store.settings.watchFolders), ["Inbox", "Knowledge"]);
   assert.deepEqual(s.saved().settings.watchFolders, ["Inbox", "Knowledge"]);
+});
+
+test("saved exclusions and nested inclusions survive a reload", async () => {
+  const s = persistedStore({ settings: { watchFolders: ["Inbox"] } });
+  await s.store.load();
+  assert.deepEqual(Array.from(s.store.settings.excludedFolders), []);
+  await s.store.updateSettings({
+    watchFolders: ["Inbox", "Inbox/Sub/Deep", "Inbox/Other"],
+    excludedFolders: ["Inbox/Sub", "Inbox/Sub/Private", "Unused"]
+  });
+  const restored = persistedStore(s.saved());
+  await restored.store.load();
+  assert.deepEqual(Array.from(restored.store.settings.watchFolders), ["Inbox", "Inbox/Sub/Deep"]);
+  assert.deepEqual(Array.from(restored.store.settings.excludedFolders), ["Inbox/Sub"]);
 });
 
 test("failed settings save restores the previous folders", async () => {

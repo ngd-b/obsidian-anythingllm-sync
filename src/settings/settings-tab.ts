@@ -14,6 +14,7 @@ import { FolderPickerModal } from "./folder-picker-modal";
 export class AnythingLLMSyncSettingTab extends PluginSettingTab {
   constructor(app: App, private readonly syncPlugin: AnythingLLMSyncPlugin) {
     super(app, syncPlugin);
+    this.containerEl.addClass("anythingllm-sync-settings");
   }
 
   getSettingDefinitions(): SettingDefinitionItem[] {
@@ -35,18 +36,14 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
       {
         name: "Test connection",
         desc: "Verify the AnythingLLM URL and Developer API key.",
-        action: async (el) => {
-          const button = findButton(el);
-          if (button) button.disabled = true;
+        action: (row) => runSettingAction(row, async () => {
           try {
             await this.syncPlugin.client.testConnection();
             new Notice("AnythingLLM Sync: connection successful.");
           } catch (error) {
             new Notice(`Connection failed: ${errorMessage(error)}`, 7000);
-          } finally {
-            if (button) button.disabled = false;
           }
-        }
+        })
       },
       {
         name: "AnythingLLM workspace",
@@ -87,19 +84,12 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
           {
             name: "Check remote sync status",
             desc: "Check whether tracked notes still exist in their AnythingLLM workspaces. Missing notes can be restored by syncing again.",
-            action: async (el) => {
-              const button = findButton(el);
-              if (button) button.disabled = true;
-              try { await this.syncPlugin.checkRemoteWithNotice(); }
-              finally { if (button) button.disabled = false; }
-            }
+            action: (row) => runSettingAction(row, () => this.syncPlugin.checkRemoteWithNotice())
           },
           {
             name: "Sync watched folders now",
             desc: "Upload or update Markdown notes in all selected folders. Overlapping folders are synced once.",
-            action: async (el) => {
-              const button = findButton(el);
-              if (button) button.disabled = true;
+            action: (row) => runSettingAction(row, async () => {
               try {
                 const result = await this.syncPlugin.syncWatchedFolderWithNotice();
                 new Notice(
@@ -108,10 +98,8 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
                 );
               } catch (error) {
                 new Notice(`AnythingLLM Sync failed: ${errorMessage(error)}`, 7000);
-              } finally {
-                if (button) button.disabled = false;
               }
-            }
+            })
           }
         ]
       },
@@ -160,16 +148,17 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
 
   private renderWatchFolders(setting: Setting): void {
     const updateSummary = () => {
-      const folders = this.syncPlugin.store.settings.watchFolders;
+      const { watchFolders: folders, excludedFolders } = this.syncPlugin.store.settings;
       const preview = folders.slice(0, 3).join(", ");
+      const scope = excludedFolders.length ? `${excludedFolders.length} folder(s) excluded.` : "Subfolders are included.";
       setting.setDesc(folders.length
-        ? `${folders.length} folder(s): ${preview}${folders.length > 3 ? ", …" : ""}. Subfolders are included.`
+        ? `${folders.length} folder(s): ${preview}${folders.length > 3 ? ", …" : ""}. ${scope}`
         : "No folders selected. Automatic folder sync is disabled.");
     };
     updateSummary();
     setting.addButton((button) => button.setButtonText("Choose folders").onClick(() => {
-      new FolderPickerModal(this.app, this.syncPlugin.store.settings.watchFolders, async (watchFolders) => {
-        await this.syncPlugin.store.updateSettings({ watchFolders });
+      new FolderPickerModal(this.app, this.syncPlugin.store.settings, async (selection) => {
+        await this.syncPlugin.store.updateSettings(selection);
         updateSummary();
       }).open();
     }));
@@ -216,8 +205,14 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
   }
 }
 
-function findButton(el: HTMLElement): HTMLButtonElement | null {
-  return el instanceof HTMLButtonElement ? el : el.querySelector("button");
+async function runSettingAction(row: HTMLElement, action: () => Promise<void>): Promise<void> {
+  if (row.getAttribute("aria-busy") === "true") return;
+  row.setAttribute("aria-busy", "true");
+  try {
+    await action();
+  } finally {
+    row.removeAttribute("aria-busy");
+  }
 }
 
 function errorMessage(error: unknown): string {
