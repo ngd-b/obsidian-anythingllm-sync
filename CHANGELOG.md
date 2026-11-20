@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0
+
+- Select all current folders, then uncheck individual folders or subfolders to exclude them from automatic and watched-folder sync.
+- See how many folders are selected and which branches are partially selected. The Confirm button stays visible while scrolling through long folder lists.
+- Apply new exclusions to notes still waiting for upload during a watched-folder sync.
+- Identify clickable settings by their arrow and see when a maintenance action is running.
+
 ## 1.1.0
 
 - Add file-explorer status badges and a note status dialog with remote verification and resync actions.
