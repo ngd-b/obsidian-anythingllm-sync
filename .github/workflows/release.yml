@@ -31,10 +31,13 @@ jobs:
           }
           NODE
       - run: npm run build
-      - name: Generate artifact attestation
+      - name: Attest the release assets
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: main.js
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
