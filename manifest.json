@@ -1,7 +1,7 @@
 {
   "id": "anythingllm-sync",
   "name": "AnythingLLM Sync",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "minAppVersion": "1.13.0",
   "description": "Sync Markdown notes from selected folders to AnythingLLM, with file status badges and remote document checks.",
   "author": "HBoot",

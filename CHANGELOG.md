@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+- Search watch folders by name or path. Matching folders appear with their ancestors, and **Select matches** selects the matching subtrees.
+- Clear the search to restore the tree and its previous expansion state while keeping your draft selections. Click **Confirm** to save, or close the picker to discard edits.
+- Keep the search field, selection count, and bulk selection button on one row. The search field uses a transparent background in light and dark themes.
+
 ## 1.2.0
 
 - Select all current folders, then uncheck individual folders or subfolders to exclude them from automatic and watched-folder sync.
