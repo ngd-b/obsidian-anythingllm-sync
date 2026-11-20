@@ -7,7 +7,6 @@ import {
   type SettingDefinitionItem
 } from "obsidian";
 import type AnythingLLMSyncPlugin from "../main";
-import type { AnythingLLMSyncSettings } from "../types";
 import { DEFAULT_SECRET_ID } from "./defaults";
 import { FolderPickerModal } from "./folder-picker-modal";
 
@@ -36,7 +35,7 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
       {
         name: "Test connection",
         desc: "Verify the AnythingLLM URL and Developer API key.",
-        action: (row) => runSettingAction(row, async () => {
+        action: (row) => void runSettingAction(row, async () => {
           try {
             await this.syncPlugin.client.testConnection();
             new Notice("AnythingLLM Sync: connection successful.");
@@ -84,12 +83,12 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
           {
             name: "Check remote sync status",
             desc: "Check whether tracked notes still exist in their AnythingLLM workspaces. Missing notes can be restored by syncing again.",
-            action: (row) => runSettingAction(row, () => this.syncPlugin.checkRemoteWithNotice())
+            action: (row) => void runSettingAction(row, () => this.syncPlugin.checkRemoteWithNotice())
           },
           {
             name: "Sync watched folders now",
             desc: "Upload or update Markdown notes in all selected folders. Overlapping folders are synced once.",
-            action: (row) => runSettingAction(row, async () => {
+            action: (row) => void runSettingAction(row, async () => {
               try {
                 const result = await this.syncPlugin.syncWatchedFolderWithNotice();
                 new Notice(
@@ -126,9 +125,7 @@ export class AnythingLLMSyncSettingTab extends PluginSettingTab {
         workspaceName: ""
       });
     }
-    return this.syncPlugin.store.updateSettings({
-      [key]: value
-    } as unknown as Partial<AnythingLLMSyncSettings>);
+    return this.syncPlugin.store.updateSettings({ [key]: value });
   }
 
   private renderApiKey(setting: Setting): void {
@@ -210,6 +207,8 @@ async function runSettingAction(row: HTMLElement, action: () => Promise<void>): 
   row.setAttribute("aria-busy", "true");
   try {
     await action();
+  } catch (error) {
+    new Notice(`AnythingLLM Sync: ${errorMessage(error)}`, 7000);
   } finally {
     row.removeAttribute("aria-busy");
   }
