@@ -39,7 +39,7 @@ Folder renames and moves recursively apply the same rules to Markdown descendant
 
 Folders inherit the nearest choice in `settings.watchFolders` and `settings.excludedFolders`. Bulk sync walks each included root and skips excluded branches. Legacy `watchFolder` settings migrate to this array on load; an explicit empty array disables automatic folder sync. Removing a configured root keeps its existing remote documents and local records.
 
-The folder picker edits a draft selection in a modal and saves only on confirmation. Select all covers the current top-level folders. Each checkbox can override its inherited choice, and mixed branches display a partial check. Saving failures stay in the modal and restore the prior in-memory settings; the settings page updates only its folder summary, preserving the page position.
+The folder picker edits a draft and writes the selection only on confirmation. Filtering by path reveals matching folders and their ancestors. Select all covers the current top-level folders. Each checkbox can override its inherited choice, and mixed branches display a partial check. Saving failures stay in the modal and restore the prior in-memory settings; the settings page updates only its folder summary, preserving the page position.
 
 File explorer context menus use Obsidian's registered `file-menu` event. Markdown file actions reuse manual sync; folder actions recursively collect Markdown notes and reuse the bulk sync loop. These actions operate on the clicked file or folder independently of the active note and automatic watch scope, without changing settings. Folder operations show an in-progress notice and final synced/skipped/failed counts.
 

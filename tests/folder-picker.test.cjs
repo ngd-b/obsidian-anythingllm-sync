@@ -11,6 +11,7 @@ class Element {
     this.attrs = { ...options.attr };
     this.text = options.text || "";
     this.type = options.type;
+    this.value = "";
     this.listeners = {};
     this.classes = new Set((options.cls || "").split(" "));
   }
@@ -22,6 +23,8 @@ class Element {
   addClass(value) { this.classes.add(value); }
   removeClass(value) { this.classes.delete(value); }
   addEventListener(event, callback) { this.listeners[event] = callback; }
+  focus() { this.focused = true; }
+  prepend(child) { this.children = [child, ...this.children.filter((el) => el !== child)]; }
   empty() { this.children = []; }
   all() { return [this, ...this.children.flatMap((child) => child.all())]; }
 }
@@ -53,11 +56,10 @@ const code = buildSync({
   entryPoints: ["src/settings/folder-picker-modal.ts"], bundle: true,
   platform: "node", format: "cjs", external: ["obsidian"], write: false
 }).outputFiles[0].text;
-const context = { module: { exports: {} }, require: () => ({ Modal, ButtonComponent, TFolder, setIcon: () => {}, normalizePath: (p) => p }) };
-vm.runInNewContext(code, context);
-const { FolderPickerModal } = context.module.exports;
-
 function setup(selected = [], save, excludedFolders = []) {
+  const context = { module: { exports: {} }, require: () => ({ Modal, ButtonComponent, TFolder, setIcon() {}, normalizePath: (p) => p }) };
+  vm.runInNewContext(code, context);
+  const { FolderPickerModal } = context.module.exports;
   const deep = new TFolder("Inbox/Sub/Deep");
   const sub = new TFolder("Inbox/Sub", [deep]);
   const inbox = new TFolder("Inbox", [sub, { path: "Inbox/a.md", name: "a.md" }]);
@@ -79,121 +81,131 @@ function setup(selected = [], save, excludedFolders = []) {
     input.checked = value;
     input.listeners.change();
   };
-  return { modal, saved, folders, checkbox, button, check };
+  const search = (value) => {
+    const input = modal.contentEl.all().find((el) => el.type === "search");
+    input.value = value;
+    input.listeners.input();
+  };
+  const row = (path) => modal.contentEl.all().find((el) => el.classes.has("anythingllm-folder-row") && el.all().includes(checkbox(path)));
+  const status = modal.contentEl.all().find((el) => el.attrs.role === "status");
+  return { modal, saved, checkbox, button, check, row, search, status };
 }
 
-test("folder tree lists nested folders, not notes, and saves only on confirm", async () => {
+test("toolbar shows the draft count and changes are saved only on Confirm", async () => {
   const s = setup();
-  assert.ok(s.checkbox("Inbox/Sub"));
-  assert.equal(s.checkbox("Inbox/a.md"), undefined);
-  s.check("Inbox/Sub", true);
-  s.check("Knowledge", true);
-  assert.equal(s.saved.length, 0);
-  await s.button("Confirm").listeners.click();
-  assert.deepEqual(s.saved, [{ watchFolders: ["Inbox/Sub", "Knowledge"], excludedFolders: [] }]);
-  assert.ok(s.modal.closed);
-});
-
-test("cancel discards draft folder choices", () => {
-  const original = ["Inbox"];
-  const s = setup(original);
+  const toolbar = s.modal.contentEl.all().find((el) => el.classes.has("anythingllm-folder-toolbar"));
+  const [searchBox, count, selectAll] = toolbar.children;
+  assert.equal(toolbar.children.length, 3);
+  assert.equal(searchBox.children[0].type, "search");
+  assert.equal(count.text, "0/4 selected");
+  assert.equal(selectAll, s.button("Select all"));
   s.button("Select all").listeners.click();
   s.check("Inbox/Sub", false);
-  s.button("Cancel").listeners.click();
-  assert.deepEqual(original, ["Inbox"]);
-  assert.equal(s.saved.length, 0);
-  assert.ok(s.modal.closed);
-});
-
-test("selected parents include descendants and allow changing them", async () => {
-  const s = setup(["Inbox/Sub"]);
-  s.check("Inbox", true);
-  assert.ok(s.checkbox("Inbox/Sub").checked);
-  assert.ok(!s.checkbox("Inbox/Sub").disabled);
-  await s.button("Confirm").listeners.click();
-  assert.deepEqual(s.saved, [{ watchFolders: ["Inbox"], excludedFolders: [] }]);
-});
-
-test("select all followed by exclusions keeps the parent selected on reopen", async () => {
-  const s = setup();
-  s.button("Select all").listeners.click();
-  for (const path of s.folders.keys()) {
-    assert.equal(s.checkbox(path).checked, true);
-    assert.equal(s.checkbox(path).disabled, false);
-  }
   s.check("Knowledge", false);
-  s.check("Inbox/Sub", false);
-  assert.equal(s.checkbox("Inbox").indeterminate, true);
+  assert.equal(count.text, "1/4 selected");
+  assert.equal(s.saved.length, 0);
+  assert.ok(s.checkbox("Inbox").indeterminate);
   assert.equal(s.checkbox("Inbox/Sub/Deep").checked, false);
   await s.button("Confirm").listeners.click();
   assert.deepEqual(s.saved, [{ watchFolders: ["Inbox"], excludedFolders: ["Inbox/Sub"] }]);
-
-  const restored = setup(s.saved[0].watchFolders, undefined, s.saved[0].excludedFolders);
-  assert.equal(restored.checkbox("Inbox").indeterminate, true);
-  assert.equal(restored.checkbox("Inbox/Sub").checked, false);
-  restored.check("Inbox/Sub/Deep", true);
-  assert.equal(restored.checkbox("Inbox/Sub").indeterminate, true);
-  restored.button("Select all").listeners.click();
-  assert.equal(restored.checkbox("Inbox").indeterminate, false);
-  await restored.button("Confirm").listeners.click();
-  assert.deepEqual(restored.saved, [{ watchFolders: ["Inbox", "Knowledge"], excludedFolders: [] }]);
+  assert.ok(s.modal.closed);
 });
 
-test("expanding a branch preserves the selection and the summary counts nested folders", () => {
-  const s = setup(["Inbox"], undefined, ["Inbox/Sub"]);
-  const nodes = s.modal.contentEl.all();
-  const toggle = nodes.find((el) => el.attrs["aria-label"] === "Subfolders of Inbox");
-  const count = nodes.find((el) => el.classes.has("anythingllm-folder-count"));
-  assert.equal(count.text, "1 of 4 folders selected");
-  assert.equal(toggle.attrs["aria-expanded"], "true");
+test("search reveals matching paths and ancestors, restores expansion and never saves", async () => {
+  const s = setup(["Knowledge"]);
+  const toggle = s.modal.contentEl.all().find((el) => el.attrs["aria-label"] === "Subfolders of Inbox");
   toggle.listeners.click();
   assert.equal(toggle.attrs["aria-expanded"], "false");
-  assert.equal(count.text, "1 of 4 folders selected");
-  s.button("Select all").listeners.click();
-  assert.equal(count.text, "4 of 4 folders selected");
+  s.search("  SUb/DEep ");
+  assert.equal(toggle.attrs["aria-expanded"], "true");
+  for (const path of ["Inbox", "Inbox/Sub", "Inbox/Sub/Deep"]) assert.equal(s.row(path).hidden, false);
+  assert.equal(s.row("Knowledge").hidden, true);
+  s.search("absent");
+  assert.ok(s.button("Select matches").disabled);
+  assert.ok(s.modal.contentEl.all().some((el) => el.text === "No matching folders." && !el.hidden));
+  const clear = s.modal.contentEl.all().find((el) => el.attrs["aria-label"] === "Clear filter");
+  clear.listeners.click();
+  const input = s.modal.contentEl.all().find((el) => el.type === "search");
+  assert.equal(input.value, "");
+  assert.ok(input.focused);
+  assert.equal(s.row("Knowledge").hidden, false);
   assert.equal(toggle.attrs["aria-expanded"], "false");
-});
-
-test("clearing every checkbox confirms an empty selection", async () => {
-  const s = setup(["Inbox"]);
-  s.check("Inbox", false);
-  assert.ok(!s.checkbox("Inbox/Sub").checked);
-  assert.ok(!s.checkbox("Inbox/Sub").disabled);
-  await s.button("Confirm").listeners.click();
-  assert.deepEqual(s.saved, [{ watchFolders: [], excludedFolders: [] }]);
-});
-
-test("save failure stays in the modal with feedback and allows a retry", async () => {
-  let attempts = 0;
-  const s = setup(["Inbox"], async () => { if (++attempts === 1) throw new Error("disk full"); });
-  await s.button("Confirm").listeners.click();
-  assert.ok(!s.modal.closed);
-  const status = s.modal.contentEl.all().find((el) => el.attrs.role === "status");
-  assert.match(status.text, /disk full/);
-  assert.ok(!s.button("Confirm").disabled);
-  await s.button("Confirm").listeners.click();
-  assert.ok(s.modal.closed);
-});
-
-test("missing folders are visible and must be unchecked before saving", async () => {
-  const s = setup(["Missing"]);
-  assert.ok(s.checkbox("Missing").checked);
-  await s.button("Confirm").listeners.click();
+  assert.equal(s.checkbox("Knowledge").checked, true);
   assert.equal(s.saved.length, 0);
-  assert.ok(!s.modal.closed);
-  s.check("Missing", false);
-  await s.button("Confirm").listeners.click();
-  assert.deepEqual(s.saved, [{ watchFolders: [], excludedFolders: [] }]);
 });
 
-test("closing is blocked while folder settings are being saved", async () => {
+test("select matches keeps unrelated selections and selects only matching subtrees", async () => {
+  const s = setup(["Knowledge"]);
+  s.search("sub");
+  s.button("Select matches").listeners.click();
+  s.search("");
+  assert.equal(s.checkbox("Inbox").checked, false);
+  assert.ok(s.checkbox("Inbox").indeterminate);
+  assert.ok(s.checkbox("Inbox/Sub/Deep").checked);
+  assert.equal(s.saved.length, 0);
+  await s.button("Confirm").listeners.click();
+  assert.deepEqual(s.saved, [{ watchFolders: ["Inbox/Sub", "Knowledge"], excludedFolders: [] }]);
+});
+
+test("repeated Confirm and close during a save commit exactly once", async () => {
+  const snapshots = [];
   let finish;
-  const s = setup(["Inbox"], () => new Promise((resolve) => { finish = resolve; }));
+  const s = setup([], async (snapshot) => {
+    snapshots.push(snapshot);
+    await new Promise((resolve) => { finish = resolve; });
+  });
+  s.check("Inbox", true);
   const pending = s.button("Confirm").listeners.click();
-  s.modal.close();
-  assert.ok(!s.modal.closed);
   assert.ok(s.checkbox("Inbox").disabled);
+  await s.button("Confirm").listeners.click();
+  s.modal.close();
+  assert.equal(s.modal.closed, false);
   finish();
   await pending;
+  assert.deepEqual(structuredClone(snapshots), [{ watchFolders: ["Inbox"], excludedFolders: [] }]);
   assert.ok(s.modal.closed);
+});
+
+test("closing discards changes from search, select all and individual checkboxes", () => {
+  const original = ["Knowledge"];
+  const s = setup(original);
+  s.button("Select all").listeners.click();
+  s.search("sub");
+  s.check("Inbox/Sub", false);
+  s.modal.close();
+  assert.equal(s.saved.length, 0);
+  assert.deepEqual(original, ["Knowledge"]);
+  assert.ok(s.modal.closed);
+});
+
+test("Confirm can save an empty selection", async () => {
+  const s = setup(["Inbox"]);
+  s.check("Inbox", false);
+  await s.button("Confirm").listeners.click();
+  assert.deepEqual(s.saved, [{ watchFolders: [], excludedFolders: [] }]);
+});
+
+test("a failed Confirm keeps the draft and error in the modal for retry", async () => {
+  let attempts = 0;
+  const s = setup([], async () => { if (++attempts === 1) throw new Error("disk full"); });
+  s.check("Inbox/Sub", true);
+  await s.button("Confirm").listeners.click();
+  assert.equal(s.modal.closed, false);
+  assert.match(s.status.text, /disk full/);
+  assert.ok(s.checkbox("Inbox/Sub").checked);
+  await s.button("Confirm").listeners.click();
+  assert.equal(s.modal.closed, true);
+  assert.equal(attempts, 2);
+});
+
+test("unavailable folders can be found and removed after a validation failure", async () => {
+  const s = setup(["Missing"]);
+  s.check("Knowledge", true);
+  await s.button("Confirm").listeners.click();
+  assert.match(s.status.text, /Missing/);
+  assert.equal(s.saved.length, 0);
+  s.search("miss");
+  s.check("Missing", false);
+  await s.button("Confirm").listeners.click();
+  assert.deepEqual(s.saved, [{ watchFolders: ["Knowledge"], excludedFolders: [] }]);
 });
